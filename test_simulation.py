@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import warnings
 import argparse
+import h5py
 warnings.filterwarnings('ignore')
 
 # 将上级目录添加到Python路径，以便导入工具包模块
@@ -30,6 +31,85 @@ from models import BillehColumn
 from classification_tools import create_model
 import pandas as pd
 
+
+class SparseLayerWithExternalBkg(tf.keras.layers.Layer):
+    """
+    修改版的SparseLayer，支持外部背景输入spikes
+    
+    与原始SparseLayer的区别：
+    - 接受外部bkg_input spikes而不是内部生成噪声
+    - 分别处理lgn_input和bkg_input，然后合并
+    """
+    def __init__(self, lgn_indices, lgn_weights, lgn_dense_shape, 
+                 bkg_indices, bkg_weights, bkg_dense_shape, dtype=tf.float32, **kwargs):
+        super().__init__(**kwargs)
+        # LGN输入参数
+        self._lgn_indices = lgn_indices
+        self._lgn_weights = tf.cast(lgn_weights, dtype)
+        self._lgn_dense_shape = lgn_dense_shape
+        
+        # 背景输入参数 - 确保数据类型一致性
+        self._bkg_indices = bkg_indices
+        self._bkg_weights = tf.cast(bkg_weights, dtype)
+        self._bkg_dense_shape = bkg_dense_shape
+        
+        self._dtype = dtype
+        self._compute_dtype = dtype
+
+    def call(self, inputs):
+        """
+        处理LGN和背景输入
+        
+        参数:
+        inputs: 包含两个元素的tuple/list
+                inputs[0]: lgn_spikes (batch, time, lgn_neurons)
+                inputs[1]: bkg_spikes (batch, time, bkg_neurons)
+        
+        返回:
+        input_current: 合并后的输入电流 (batch, time, neurons*4)
+        """
+        lgn_spikes, bkg_spikes = inputs
+        
+        # 获取输入形状
+        lgn_tf_shp = tf.unstack(tf.shape(lgn_spikes))
+        lgn_shp = lgn_spikes.shape.as_list()
+        for i, a in enumerate(lgn_shp):
+            if a is None:
+                lgn_shp[i] = lgn_tf_shp[i]
+        
+        bkg_tf_shp = tf.unstack(tf.shape(bkg_spikes))
+        bkg_shp = bkg_spikes.shape.as_list()
+        for i, a in enumerate(bkg_shp):
+            if a is None:
+                bkg_shp[i] = bkg_tf_shp[i]
+        
+        # 处理LGN输入 - 参照原始SparseLayer的lgn处理方式
+        lgn_sparse_w_in = tf.sparse.SparseTensor(
+            self._lgn_indices, self._lgn_weights, self._lgn_dense_shape)
+        lgn_inp = tf.reshape(lgn_spikes, (lgn_shp[0] * lgn_shp[1], lgn_shp[2]))
+        
+        lgn_current = tf.sparse.sparse_dense_matmul(
+            lgn_sparse_w_in, tf.cast(lgn_inp, tf.float32), adjoint_b=True)
+        lgn_current = tf.transpose(lgn_current)
+        lgn_current = tf.cast(lgn_current, self._dtype)
+        lgn_current = tf.reshape(lgn_current, (lgn_shp[0], lgn_shp[1], -1))
+        
+        # 处理背景输入 - 使用相同的稀疏矩阵乘法方式
+        bkg_sparse_w_in = tf.sparse.SparseTensor(
+            self._bkg_indices, self._bkg_weights, self._bkg_dense_shape)
+        bkg_inp = tf.reshape(bkg_spikes, (bkg_shp[0] * bkg_shp[1], bkg_shp[2]))
+        
+        bkg_current = tf.sparse.sparse_dense_matmul(
+            bkg_sparse_w_in, tf.cast(bkg_inp, tf.float32), adjoint_b=True)
+        bkg_current = tf.transpose(bkg_current)
+        bkg_current = tf.cast(bkg_current, self._dtype)
+        bkg_current = tf.reshape(bkg_current, (bkg_shp[0], bkg_shp[1], -1))
+        
+        # 合并LGN和背景输入电流
+        total_current = lgn_current + bkg_current
+        
+        return total_current
+    
 
 class V1SimulationTester:
     """
@@ -132,36 +212,26 @@ class V1SimulationTester:
     
     def prepare_simulation(self, network, input_populations):
         """
-        准备仿真所需的参数和数据
+        准备使用外部背景输入的仿真参数
         
         参数：
         network: 网络结构
-        input_populations: 输入信号
+        input_populations: 输入信号，包含lgn_input和bkg_input
         
         返回：
-        cell: BillehColumn神经元模型
-        input_spikes: 输入脉冲信号
-        bkg_weights: 背景输入权重
+        cell: BillehColumn神经元模型（背景权重设为0）
+        lgn_input: LGN输入数据
+        bkg_input: 背景输入数据
         """
         # 提取LGN和背景输入
         lgn_input = input_populations[0]
         bkg_input = input_populations[1]
         
-        # 计算背景输入权重
-        # 背景输入代表来自大脑其他区域的非特异性输入
+        # 将背景权重设为0，因为我们要使用外部背景输入
         bkg_weights = np.zeros(network['n_nodes'] * 4)  # 4种受体类型
-        for idx, weight in zip(bkg_input['indices'], bkg_input['weights']):
-            bkg_weights[idx[0]] += weight
-        
-        print(f"\n背景输入权重统计：")
-        print(f"  平均值: {np.mean(bkg_weights):.4f}")
-        print(f"  标准差: {np.std(bkg_weights):.4f}")
-        print(f"  最小值: {np.min(bkg_weights):.4f}")
-        print(f"  最大值: {np.max(bkg_weights):.4f}")
         
         # 创建BillehColumn模型
-        # 该模型实现了GLIF3（广义漏积分发放）神经元动力学
-        print("\n创建BillehColumn神经元模型...")
+        print("\n创建BillehColumn神经元模型（外部背景输入模式）...")
         cell = BillehColumn(
             network=network,
             input_population=lgn_input,
@@ -174,9 +244,9 @@ class V1SimulationTester:
             _return_interal_variables=True  # 返回内部变量用于分析
         )
         
-        return cell, lgn_input, bkg_weights
+        return cell, lgn_input, bkg_input
     
-    def run_simulation(self, cell, lgn_input, batch_size=1, use_rnn_layer=False):
+    def run_simulation(self, cell, lgn_input, bkg_input, batch_size=1):
         """
         运行神经网络仿真
         
@@ -189,147 +259,50 @@ class V1SimulationTester:
         返回：
         simulation_results: 包含脉冲、膜电位等的仿真结果字典
         """
-        method_name = "TensorFlow RNN层" if use_rnn_layer else "逐时间步循环"
-        print(f"\n开始运行仿真（方法：{method_name}，批次大小={batch_size}）...")
         
         # 准备输入数据
         n_timesteps = int(self.simulation_time / self.dt)
-        input_spikes = lgn_input['spikes']
-        input_spikes = tf.convert_to_tensor(input_spikes, dtype=tf.float32)
-        input_spikes = tf.expand_dims(input_spikes, 0)  # 添加批次维度
-        input_spikes = tf.tile(input_spikes, [batch_size, 1, 1])
         
-        if use_rnn_layer:
-            # 方法1：使用TensorFlow RNN层（原始工具包方法）
-            return self._run_rnn_simulation(cell, input_spikes, batch_size, n_timesteps)
-        else:
-            # 方法2：逐时间步手动循环（测试工具包方法）
-            return self._run_manual_simulation(cell, input_spikes, batch_size, n_timesteps)
-    
-    def _run_rnn_simulation(self, cell, input_spikes, batch_size, n_timesteps):
-        """
-        使用TensorFlow RNN层的仿真方法（原始工具包方法）
+        # LGN输入spikes
+        lgn_spikes = lgn_input['spikes']
+        lgn_spikes = tf.convert_to_tensor(lgn_spikes, dtype=tf.float32)
+        lgn_spikes = tf.expand_dims(lgn_spikes, 0)  # 添加批次维度
+        lgn_spikes = tf.tile(lgn_spikes, [batch_size, 1, 1])
         
-        优点：
-        - 计算效率高，GPU并行优化
-        - 内存管理优化
-        - 支持自动微分和训练
+        # 背景输入spikes
+        bkg_spikes = bkg_input['spikes']
+        bkg_spikes = tf.convert_to_tensor(bkg_spikes, dtype=tf.float32)
+        bkg_spikes = tf.expand_dims(bkg_spikes, 0)  # 添加批次维度
+        bkg_spikes = tf.tile(bkg_spikes, [batch_size, 1, 1])
         
-        适用场景：
-        - 大规模仿真
-        - 模型训练
-        - 生产环境使用
-        """
-        print("使用TensorFlow RNN层方法...")
-        import time
-        start_time = time.time()
-        
-        from models import SparseLayer
-        
-        # 构建输入层
-        input_layer = SparseLayer(
-            indices=cell.input_indices,
-            weights=cell.input_weight_values,
-            dense_shape=cell.input_dense_shape,
-            bkg_weights=cell.bkg_weights,
-            use_decoded_noise=False,
-            dtype=tf.float32
-        )
-        
-        # 处理输入
-        rnn_inputs = input_layer(input_spikes)
-        
-        # 初始状态
-        initial_state = cell.zero_state(batch_size, dtype=tf.float32)
-        
-        # 创建RNN层
-        rnn = tf.keras.layers.RNN(
-            cell, 
-            return_sequences=True, 
-            return_state=False,
-            name='billeh_rnn'
-        )
-        
-        # 运行RNN - 一次性处理所有时间步
-        outputs = rnn(rnn_inputs, initial_state=initial_state)
-        
-        # 提取结果
-        all_spikes = outputs[0]       # (batch, time, neurons)
-        all_voltages = outputs[1]     # (batch, time, neurons)
-        all_ascs = outputs[2]         # (batch, time, neurons, 2)
-        all_psc_rise = outputs[3]     # (batch, time, neurons*4)
-        all_psc = outputs[4]          # (batch, time, neurons*4)
-        
-        computation_time = time.time() - start_time
-        print(f"RNN层仿真完成！耗时: {computation_time:.3f} 秒")
-        
-        # 计算统计信息
-        spike_rates = tf.reduce_mean(all_spikes, axis=(0, 1)).numpy()
-        mean_rate = np.mean(spike_rates)
-        
-        print(f"\n仿真统计：")
-        print(f"  平均发放率: {mean_rate:.2f} Hz")
-        print(f"  活跃神经元比例: {np.mean(spike_rates > 0.1):.2%}")
-        
-        simulation_results = {
-            'spikes': all_spikes.numpy(),
-            'voltages': all_voltages.numpy(),
-            'adaptive_currents': all_ascs.numpy(),
-            'psc_rise': all_psc_rise.numpy(),
-            'psc': all_psc.numpy(),
-            'spike_rates': spike_rates,
-            'time_axis': np.arange(n_timesteps) * self.dt,
-            'computation_time': computation_time,
-            'method': 'RNN层'
-        }
-        
-        return simulation_results
-    
-    def _run_manual_simulation(self, cell, input_spikes, batch_size, n_timesteps):
+        return self._run_manual_simulation(
+               cell, lgn_spikes, bkg_spikes, lgn_input, bkg_input, batch_size, n_timesteps)
+
+    def _run_manual_simulation(self, cell, lgn_spikes, bkg_spikes, 
+                               lgn_input, bkg_input, batch_size, n_timesteps):
         """
         逐时间步手动循环的仿真方法（测试工具包方法）
-        
-        优点：
-        - 容易理解和调试
-        - 可以在每个时间步插入自定义逻辑
-        - 便于监控和分析
-        
-        缺点：
-        - 计算效率较低
-        - Python循环开销
-        
-        适用场景：
-        - 算法调试
-        - 详细分析
-        - 自定义监控
         """
-        print("使用逐时间步循环方法...")
+
         import time
         start_time = time.time()
         
-        from models import SparseLayer
-        
         # 初始化神经元状态
-        # 状态包括：
-        # - z_buffer: 脉冲缓冲区（用于实现突触延迟）
-        # - v: 膜电位
-        # - r: 不应期
-        # - asc_1, asc_2: 两个自适应电流
-        # - psc_rise, psc: 突触后电流（上升相和衰减相）
         initial_state = cell.zero_state(batch_size, dtype=tf.float32)
         
-        # 通过输入层转换输入脉冲为输入电流
-        input_layer = SparseLayer(
-            indices=cell.input_indices,
-            weights=cell.input_weight_values,
-            dense_shape=cell.input_dense_shape,
-            bkg_weights=cell.bkg_weights,
-            use_decoded_noise=False,
+        # 创建支持外部背景输入的输入层
+        input_layer = SparseLayerWithExternalBkg(
+            lgn_indices=cell.input_indices,
+            lgn_weights=cell.input_weight_values,
+            lgn_dense_shape=cell.input_dense_shape,
+            bkg_indices=bkg_input['indices'],
+            bkg_weights=bkg_input['weights'],
+            bkg_dense_shape=(cell._n_receptors * cell._n_neurons, bkg_input['n_inputs']),
             dtype=tf.float32
         )
         
         # 计算输入电流
-        input_currents = input_layer(input_spikes)
+        input_currents = input_layer([lgn_spikes, bkg_spikes])
         
         # 运行仿真
         print("运行神经动力学仿真...")
@@ -343,7 +316,7 @@ class V1SimulationTester:
         
         state = initial_state
         
-        # 逐时间步仿真 - 手动循环
+        # 逐时间步仿真
         for t in range(n_timesteps):
             if t % 100 == 0:
                 print(f"  仿真进度: {t}/{n_timesteps} 时间步")
@@ -352,20 +325,14 @@ class V1SimulationTester:
             current_input = input_currents[:, t, :]
             
             # 运行一个时间步的神经动力学
-            # 这里调用BillehColumn.call()方法，实现了：
-            # 1. GLIF3神经元膜电位更新
-            # 2. 突触后电流计算
-            # 3. 自适应电流更新
-            # 4. 脉冲生成和不应期处理
             outputs, state = cell(current_input, state)
             
             # 提取输出
-            # outputs包含: (spikes, voltages, ascs, psc_rise, psc)
-            spikes = outputs[0]    # 脉冲发放（0或1）
-            voltages = outputs[1]  # 膜电位（mV）
-            ascs = outputs[2]      # 自适应电流（两个分量）
-            psc_rise = outputs[3]  # 突触后电流上升相
-            psc = outputs[4]       # 突触后电流
+            spikes = outputs[0]
+            voltages = outputs[1]
+            ascs = outputs[2]
+            psc_rise = outputs[3]
+            psc = outputs[4]
             
             spikes_list.append(spikes)
             voltages_list.append(voltages)
@@ -374,14 +341,14 @@ class V1SimulationTester:
             psc_list.append(psc)
         
         # 堆叠结果
-        all_spikes = tf.stack(spikes_list, axis=1)      # (batch, time, neurons)
-        all_voltages = tf.stack(voltages_list, axis=1)  # (batch, time, neurons)
-        all_ascs = tf.stack(asc_list, axis=1)          # (batch, time, neurons, 2)
-        all_psc_rise = tf.stack(psc_rise_list, axis=1) # (batch, time, neurons*4)
-        all_psc = tf.stack(psc_list, axis=1)           # (batch, time, neurons*4)
+        all_spikes = tf.stack(spikes_list, axis=1)
+        all_voltages = tf.stack(voltages_list, axis=1)
+        all_ascs = tf.stack(asc_list, axis=1)
+        all_psc_rise = tf.stack(psc_rise_list, axis=1)
+        all_psc = tf.stack(psc_list, axis=1)
         
         computation_time = time.time() - start_time
-        print(f"逐时间步仿真完成！耗时: {computation_time:.3f} 秒")
+        print(f"仿真完成！耗时: {computation_time:.3f} 秒")
         
         # 计算统计信息
         spike_rates = tf.reduce_mean(all_spikes, axis=(0, 1)).numpy()
@@ -400,70 +367,10 @@ class V1SimulationTester:
             'spike_rates': spike_rates,
             'time_axis': np.arange(n_timesteps) * self.dt,
             'computation_time': computation_time,
-            'method': '逐时间步'
+            'method': '外部背景输入'
         }
         
         return simulation_results
-    
-    def analyze_by_layer_and_type(self, network, simulation_results):
-        """
-        按层和细胞类型分析仿真结果
-        
-        参数：
-        network: 网络结构
-        simulation_results: 仿真结果
-        
-        返回：
-        analysis_results: 分析结果字典
-        """
-        print("\n按层和细胞类型分析神经活动...")
-        
-        analysis_results = {}
-        
-        # 定义要分析的层
-        layers = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6']
-        cell_types = ['e', 'i']  # 兴奋性和抑制性
-        
-        for layer in layers:
-            for cell_type in cell_types:
-                pop_name = f"{layer}{cell_type}"
-                
-                # 检查该群体是否存在
-                if pop_name not in network['laminar_indices']:
-                    continue
-                
-                # 获取该群体的神经元索引
-                neuron_indices = network['laminar_indices'][pop_name]
-                
-                if len(neuron_indices) == 0:
-                    continue
-                
-                # 提取该群体的活动
-                pop_spikes = simulation_results['spikes'][:, :, neuron_indices]
-                pop_voltages = simulation_results['voltages'][:, :, neuron_indices]
-                
-                # 计算统计信息
-                mean_rate = np.mean(pop_spikes) * 1000 / self.dt  # 转换为Hz
-                
-                # 计算膜电位统计
-                mean_voltage = np.mean(pop_voltages)
-                std_voltage = np.std(pop_voltages)
-                
-                analysis_results[pop_name] = {
-                    'neuron_count': len(neuron_indices),
-                    'mean_firing_rate': mean_rate,
-                    'mean_voltage': mean_voltage,
-                    'std_voltage': std_voltage,
-                    'neuron_indices': neuron_indices
-                }
-                
-                cell_type_name = "兴奋性" if cell_type == 'e' else "抑制性"
-                print(f"  {layer}层{cell_type_name}神经元 ({pop_name}):")
-                print(f"    神经元数量: {len(neuron_indices)}")
-                print(f"    平均发放率: {mean_rate:.2f} Hz")
-                print(f"    平均膜电位: {mean_voltage:.2f} mV")
-                
-        return analysis_results
     
     def save_results(self, simulation_results, analysis_results, output_dir='results'):
         """
@@ -490,208 +397,133 @@ class V1SimulationTester:
         
         print(f"\n结果已保存到: {output_dir}")
     
-    def plot_sample_activity(self, network, simulation_results, analysis_results, 
-                            sample_neurons=10, output_dir='figures'):
+    def save_spikes_to_h5(self, simulation_results, network, output_file, 
+                         selected_indices=None, metadata=None):
         """
-        绘制样本神经元活动
+        将仿真结果保存为与spikes_resting_3s_1500fr.h5相同格式的HDF5文件
         
         参数：
-        network: 网络结构
-        simulation_results: 仿真结果
-        analysis_results: 分析结果
-        sample_neurons: 每种类型要绘制的神经元数量
-        output_dir: 输出目录
+        simulation_results: 仿真结果字典，包含'spikes'和'time_axis'
+        network: 网络结构字典，包含神经元ID映射信息
+        output_file: 输出HDF5文件路径
+        selected_indices: 可选，选择特定神经元的索引
+        metadata: 可选，额外的元数据字典
+        
+        HDF5文件结构：
+        /spikes/v1/timestamps - 脉冲时间戳 (ms)
+        /spikes/v1/node_ids - 神经元节点ID
         """
-        os.makedirs(output_dir, exist_ok=True)
+        print(f"\n将仿真结果保存为HDF5格式: {output_file}")
         
-        # 为每个层级和类型绘制样本神经元
-        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-        axes = axes.flatten()
+        # 提取数据 (batch=0)
+        spikes = simulation_results['spikes'][0]  # shape: (time, neurons)
+        time_axis = simulation_results['time_axis']
         
-        plot_idx = 0
-        for layer in ['L2', 'L4', 'L5']:
-            for cell_type in ['e', 'i']:
-                pop_name = f"{layer}{cell_type}"
+        # 如果指定了特定神经元，则只保存这些神经元的数据
+        if selected_indices is not None:
+            spikes = spikes[:, selected_indices]
+            print(f"选择了 {len(selected_indices)} 个神经元")
+        
+        # 转换为timestamps和node_ids格式
+        timestamps = []
+        node_ids = []
+        
+        print("转换脉冲数据为timestamps和node_ids格式...")
+        
+        for neuron_idx in range(spikes.shape[1]):
+            # 找到该神经元的脉冲时间点
+            spike_indices = np.where(spikes[:, neuron_idx] > 0)[0]
+            
+            if len(spike_indices) > 0:
+                # 直接使用离散时间步，不进行精确时间估算
+                spike_times = time_axis[spike_indices]
+                timestamps.extend(spike_times)
                 
-                if pop_name not in analysis_results:
-                    continue
-                
-                # 获取神经元索引
-                neuron_indices = analysis_results[pop_name]['neuron_indices']
-                
-                if len(neuron_indices) < sample_neurons:
-                    sample_indices = neuron_indices
+                # 确定真实的神经元ID
+                if selected_indices is not None:
+                    real_neuron_id = selected_indices[neuron_idx]
                 else:
-                    sample_indices = np.random.choice(neuron_indices, sample_neurons, replace=False)
+                    real_neuron_id = neuron_idx
                 
-                # 绘制膜电位
-                ax = axes[plot_idx]
-                time_axis = simulation_results['time_axis']
+                # 如果网络中有bmtk_id映射，使用真实的BMTK ID
+                if 'tf_id_to_bmtk_id' in network:
+                    tf_to_bmtk_mapping = network['tf_id_to_bmtk_id']
+                    # 检查映射是否为字典类型
+                    if isinstance(tf_to_bmtk_mapping, dict):
+                        bmtk_id = tf_to_bmtk_mapping.get(real_neuron_id, real_neuron_id)
+                    elif isinstance(tf_to_bmtk_mapping, np.ndarray):
+                        # 如果是numpy数组，使用索引访问
+                        if real_neuron_id < len(tf_to_bmtk_mapping):
+                            bmtk_id = tf_to_bmtk_mapping[real_neuron_id]
+                        else:
+                            bmtk_id = real_neuron_id
+                    else:
+                        # 其他类型，直接使用原始ID
+                        bmtk_id = real_neuron_id
+                else:
+                    bmtk_id = real_neuron_id
                 
-                for i, neuron_idx in enumerate(sample_indices):
-                    voltage = simulation_results['voltages'][0, :, neuron_idx]
-                    ax.plot(time_axis, voltage + i * 20, 'k', linewidth=0.5)
-                    
-                    # 标记脉冲
-                    spike_times = time_axis[simulation_results['spikes'][0, :, neuron_idx] > 0]
-                    for spike_time in spike_times:
-                        ax.plot([spike_time, spike_time], 
-                               [i * 20 - 5, i * 20 + 5], 'r', linewidth=1)
-                
-                cell_type_name = "Exc" if cell_type == 'e' else "Inh"
-                ax.set_title(f"{layer} layer {cell_type_name} neuron")
-                ax.set_xlabel("time (ms)")
-                ax.set_ylabel("voltage (mV)")
-                ax.set_xlim([0, min(1000, self.simulation_time)])
-                
-                plot_idx += 1
+                node_ids.extend([bmtk_id] * len(spike_times))
         
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, 'sample_neuron_activity.png'), dpi=300)
-        plt.close()
+        timestamps = np.array(timestamps, dtype=np.float64)
+        node_ids = np.array(node_ids, dtype=np.int64)
         
-        print(f"\n活动图已保存到: {output_dir}")
-
-
-def parse_arguments():
-    """
-    解析命令行参数
-    """
-    parser = argparse.ArgumentParser(
-        description='V1模型仿真测试工具 - 支持指定数据文件夹和输出文件夹',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-使用示例：
-  python test_simulation.py GLIF_network simulation_results
-  python test_simulation.py ../GLIF_network ./results --simulation-time 2000 --dt 0.5
-  python test_simulation.py Converted_param output_folder --n-neurons 1000 --core-only
-        """
-    )
-    
-    parser.add_argument(
-        'data_dir',
-        help='数据文件夹路径（包含network_dat.pkl、input_dat.pkl和network子文件夹）'
-    )
-    
-    parser.add_argument(
-        'output_dir',
-        help='输出文件夹路径（保存仿真结果和分析结果）'
-    )
-    
-    parser.add_argument(
-        '--simulation-time',
-        type=int,
-        default=1000,
-        help='仿真时长（毫秒，默认：1000）'
-    )
-    
-    parser.add_argument(
-        '--dt',
-        type=float,
-        default=1.0,
-        help='时间步长（毫秒，默认：1.0）'
-    )
-    
-    parser.add_argument(
-        '--n-neurons',
-        type=int,
-        default=None,
-        help='使用的神经元数量（默认：使用所有神经元）'
-    )
-    
-    parser.add_argument(
-        '--core-only',
-        action='store_true',
-        help='是否只使用核心区域神经元（半径<400μm）'
-    )
-    
-    parser.add_argument(
-        '--use-rnn-layer',
-        action='store_true',
-        help='使用TensorFlow RNN层方法（默认：逐时间步方法）'
-    )
-    
-    parser.add_argument(
-        '--batch-size',
-        type=int,
-        default=1,
-        help='批次大小（默认：1）'
-    )
-    
-    parser.add_argument(
-        '--seed',
-        type=int,
-        default=42,
-        help='随机种子（默认：42）'
-    )
-    
-    parser.add_argument(
-        '--plot-activity',
-        action='store_true',
-        help='绘制样本神经元活动图'
-    )
-    
-    return parser.parse_args()
-
-
-def main():
-    """
-    主测试函数
-    """
-    # 解析命令行参数
-    args = parse_arguments()
-    
-    print("=" * 60)
-    print("V1模型仿真测试")
-    print("=" * 60)
-    print(f"数据文件夹: {args.data_dir}")
-    print(f"输出文件夹: {args.output_dir}")
-    print(f"仿真时长: {args.simulation_time} ms")
-    print(f"时间步长: {args.dt} ms")
-    print(f"神经元数量: {args.n_neurons if args.n_neurons else '全部'}")
-    print(f"仅核心区域: {'是' if args.core_only else '否'}")
-    print(f"仿真方法: {'RNN层' if args.use_rnn_layer else '逐时间步'}")
-    
-    # 创建测试器
-    tester = V1SimulationTester(
-        data_dir=args.data_dir,
-        simulation_time=args.simulation_time,
-        dt=args.dt,
-        seed=args.seed
-    )
-    
-    # 加载网络和输入
-    network, input_populations = tester.load_network_and_input(
-        n_neurons=args.n_neurons,
-        core_only=args.core_only
-    )
-    
-    # 准备仿真
-    cell, lgn_input, bkg_weights = tester.prepare_simulation(network, input_populations)
-    
-    # 运行仿真
-    method_name = "RNN层方法：原始工具包方法，计算更快" if args.use_rnn_layer else "逐时间步方法：便于调试和理解，计算较慢"
-    print(f"\n使用{method_name}")
-    simulation_results = tester.run_simulation(
-        cell, lgn_input, 
-        batch_size=args.batch_size, 
-        use_rnn_layer=args.use_rnn_layer
-    )
-    
-    # 分析结果
-    analysis_results = tester.analyze_by_layer_and_type(network, simulation_results)
-    
-    # 保存结果
-    tester.save_results(simulation_results, analysis_results, output_dir=args.output_dir)
-    
-    # 绘制样本活动（可选）
-    if args.plot_activity:
-        figures_dir = os.path.join(args.output_dir, 'figures')
-        tester.plot_sample_activity(network, simulation_results, analysis_results, output_dir=figures_dir)
-    
-    print("\n测试完成！")
-    print(f"结果已保存到: {args.output_dir}")
-
-
-if __name__ == "__main__":
-    main()
+        print(f"总共 {len(timestamps)} 个脉冲事件")
+        print(f"时间范围: {np.min(timestamps):.2f} - {np.max(timestamps):.2f} ms")
+        print(f"涉及神经元: {len(np.unique(node_ids))} 个")
+        print(f"神经元ID范围: {np.min(node_ids)} - {np.max(node_ids)}")
+        
+        # 保存为HDF5文件
+        with h5py.File(output_file, 'w') as f:
+            # 创建spikes组
+            spikes_group = f.create_group('spikes')
+            
+            # 创建v1子组
+            v1_group = spikes_group.create_group('v1')
+            
+            # 保存timestamps数据集
+            timestamps_dataset = v1_group.create_dataset(
+                'timestamps', 
+                data=timestamps,
+                dtype=np.float64,
+                compression='gzip',
+                compression_opts=9
+            )
+            timestamps_dataset.attrs['units'] = b'ms'
+            
+            # 保存node_ids数据集
+            node_ids_dataset = v1_group.create_dataset(
+                'node_ids',
+                data=node_ids, 
+                dtype=np.int64,
+                compression='gzip',
+                compression_opts=9
+            )
+            
+            # 添加v1组的属性
+            v1_group.attrs['sorting'] = 'none'
+            
+            # 添加仿真元数据
+            if metadata is None:
+                metadata = {}
+            
+            # 默认元数据
+            default_metadata = {
+                'simulation_time_ms': self.simulation_time,
+                'dt_ms': self.dt,
+                'n_neurons_simulated': spikes.shape[1],
+                'n_spikes_total': len(timestamps),
+                'creation_time': datetime.now().isoformat(),
+                'source': 'V1SimulationTester'
+            }
+            
+            # 合并元数据
+            all_metadata = {**default_metadata, **metadata}
+            
+            # 将元数据添加到根组
+            for key, value in all_metadata.items():
+                f.attrs[key] = value
+        
+        print(f"HDF5文件保存完成: {output_file}")
+        
+        return output_file
