@@ -9,7 +9,7 @@ Chen Package Test是一个专门用于测试和验证[Training-data-driven-V1-mo
 确保您有以下格式的数据文件：
 
 ```
-Training-data-driven-V1-model-test
+Training-data-driven-V1-model
 ├── Chen工具包的所有内容
     Chen_package_test (我们的测试工具包放在Chen工具包文件夹下)
     ├── Allen_V1_param/                  # BMTK数据目录
