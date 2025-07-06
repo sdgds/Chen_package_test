@@ -2,14 +2,14 @@
 
 ## 概述
 
-Chen Package Test是一个专门用于测试和验证[Training-data-driven-V1-model](https://github.com/ifgovh/Training-data-driven-V1-model-test)工具包的仿真测试框架。该工具包基于Allen研究所的小鼠V1（初级视觉皮层）模型，实现了GLIF3（广义漏积分发放）神经元模型的大规模网络仿真。
+Chen Package Test是一个专门用于测试和验证[Training-data-driven-V1-model-test](https://github.com/ifgovh/Training-data-driven-V1-model-test)工具包的仿真测试框架。该工具包基于Allen研究所的小鼠V1（初级视觉皮层）模型，实现了GLIF3（广义漏积分发放）神经元模型的大规模网络仿真。
 
-## 数据准备
+## 📁 数据准备
 
 确保您有以下格式的数据文件：
 
 ```
-Training-data-driven-V1-model
+Training-data-driven-V1-model-test
 ├── Chen工具包的所有内容
     Chen_package_test (我们的测试工具包放在Chen工具包文件夹下)
     ├── Allen_V1_param/                  # BMTK数据目录
@@ -23,10 +23,11 @@ Training-data-driven-V1-model
     └── README.md              
 ```
 
+---
 
-## 核心模块详解
+## 🔧 核心模块详解
 
-### 1. test_simulation.py - 主仿真测试模块
+### 1️⃣ test_simulation.py - 主仿真测试模块
 
 #### SparseLayerWithExternalBkg类
 
@@ -46,11 +47,33 @@ Training-data-driven-V1-model
 - **真实连接**: 使用从BMTK数据转换得到的真实背景连接权重
 - **动态合并**: 将LGN电流和背景电流动态合并为总输入电流
 
+<details>
+<summary><strong>💻 技术实现对比</strong></summary>
+
+```python
+# 原始SparseLayer的背景噪声生成方式
+rest_of_brain = tf.reduce_sum(tf.cast(
+    tf.random.uniform((shp[0], shp[1], 10)) < .1, self._compute_dtype), -1)
+noise_input = tf.cast(
+    self._bkg_weights[None, None], self._compute_dtype) * rest_of_brain[..., None] / 10.
+
+# SparseLayerWithExternalBkg的真实背景输入处理
+bkg_sparse_w_in = tf.sparse.SparseTensor(
+    self._bkg_indices, self._bkg_weights, self._bkg_dense_shape)
+bkg_current = tf.sparse.sparse_dense_matmul(
+    bkg_sparse_w_in, tf.cast(bkg_inp, tf.float32), adjoint_b=True)
+```
+
+</details>
+
 #### V1SimulationTester类
 
 **功能**: 封装了V1模型的完整仿真测试流程
 
 **核心方法**:
+
+<details>
+<summary><strong>📋 查看所有方法详情</strong></summary>
 
 ##### `__init__(data_dir, simulation_time, dt, seed)`
 - **功能**: 初始化仿真测试器
@@ -119,13 +142,18 @@ Training-data-driven-V1-model
   /spikes/v1/node_ids - 神经元节点ID
   ```
 
-### 2. interactive_test.py - 交互式测试模块
+</details>
+
+### 2️⃣ interactive_test.py - 交互式测试模块
 
 #### InteractiveV1Tester类
 
 **功能**: 继承V1SimulationTester，添加交互式功能
 
 **核心方法**:
+
+<details>
+<summary><strong>📋 查看所有方法详情</strong></summary>
 
 ##### `select_neurons_by_criteria(network, layer, cell_type, spatial_region, neuron_ids)`
 - **功能**: 根据多种条件选择神经元
@@ -157,7 +185,9 @@ Training-data-driven-V1-model
 - **支持格式**: NPZ（NumPy压缩）、CSV
 - **数据内容**: 脉冲时间、膜电位、自适应电流等
 
-### 3. bmtk_to_pkl_converter.py - 数据转换模块
+</details>
+
+### 3️⃣ bmtk_to_pkl_converter.py - 数据转换模块
 
 #### 功能概述
 将BMTK（Brain Modeling Toolkit）格式的网络数据转换为工具包兼容的PKL格式。
@@ -176,16 +206,20 @@ Training-data-driven-V1-model
 - **LGN输入**: 模拟视觉刺激信号，通常包含方向选择性和时间动态
 - **背景输入**: 模拟大脑其他区域的输入，通常为泊松分布的随机脉冲
 
-## 神经科学原理
+---
+
+## 🧠 神经科学原理
 
 ### GLIF3神经元模型
 
 GLIF3（Generalized Leaky Integrate-and-Fire level 3）是Allen研究所开发的生物学真实神经元模型。
 
 #### 膜电位动力学方程
-```
-C_m * dV/dt = -g * (V - E_L) + I_syn + I_asc + I_ext
-```
+
+> **核心方程**:
+> ```
+> C_m * dV/dt = -g * (V - E_L) + I_syn + I_asc + I_ext
+> ```
 
 **参数物理意义**:
 - `C_m`: 膜电容（法拉德），决定膜电位变化的时间常数
@@ -197,20 +231,24 @@ C_m * dV/dt = -g * (V - E_L) + I_syn + I_asc + I_ext
 - `I_ext`: 外部输入电流（安培）
 
 #### 自适应电流动力学
-```
-dI_asc1/dt = -k1 * I_asc1 + A1 * δ(t - t_spike)
-dI_asc2/dt = -k2 * I_asc2 + A2 * δ(t - t_spike)
-```
+
+> **自适应方程**:
+> ```
+> dI_asc1/dt = -k1 * I_asc1 + A1 * δ(t - t_spike)
+> dI_asc2/dt = -k2 * I_asc2 + A2 * δ(t - t_spike)
+> ```
 
 **物理意义**: 模拟神经元发放后的自适应过程，包括钠钾泵激活、钙依赖性钾通道开放等。
 
 #### 突触动力学
 
 **双指数突触后电流模型**:
-```
-I_syn = Σ_i PSC_i(t)
-PSC_i(t) = A * (exp(-t/τ_decay) - exp(-t/τ_rise))
-```
+
+> **突触方程**:
+> ```
+> I_syn = Σ_i PSC_i(t)
+> PSC_i(t) = A * (exp(-t/τ_decay) - exp(-t/τ_rise))
+> ```
 
 **四种受体类型**:
 1. **AMPA**: 快速兴奋性，τ_rise ≈ 0.2ms, τ_decay ≈ 2ms
@@ -231,7 +269,9 @@ PSC_i(t) = A * (exp(-t/τ_decay) - exp(-t/τ_rise))
 - **兴奋性神经元**: 释放谷氨酸，激活下游神经元
 - **抑制性神经元**: 释放GABA，抑制下游神经元
 
-## 使用指南
+---
+
+## 🚀 使用指南
 
 ### 基本使用
 
