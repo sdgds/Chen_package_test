@@ -28,6 +28,24 @@ Training-data-driven-V1-model-test
 
 ### 1. test_simulation.py - 主仿真测试模块
 
+#### SparseLayerWithExternalBkg类
+
+**设计动机**: 原始工具包中的`SparseLayer`类使用内部生成的随机噪声来模拟背景输入，这种方式虽然计算效率高，但缺乏生物学真实性。为了支持更真实的背景输入模式，我们开发了`SparseLayerWithExternalBkg`类。
+
+**与原始SparseLayer的关键区别**:
+
+| 特性 | 原始SparseLayer | SparseLayerWithExternalBkg |
+|------|----------------|---------------------------|
+| **背景输入来源** | 内部生成随机噪声 | 外部真实脉冲数据 |
+| **输入参数** | 单一LGN输入 | 分离的LGN和背景输入 |
+| **噪声模型** | 泊松随机过程或预计算噪声 | 基于BMTK的真实背景活动 |
+| **生物学真实性** | 简化模型 | 高度真实的背景连接 |
+
+**核心功能**:
+- **分离处理**: 独立处理LGN输入和背景输入的稀疏矩阵乘法
+- **真实连接**: 使用从BMTK数据转换得到的真实背景连接权重
+- **动态合并**: 将LGN电流和背景电流动态合并为总输入电流
+
 #### V1SimulationTester类
 
 **功能**: 封装了V1模型的完整仿真测试流程
@@ -70,12 +88,27 @@ Training-data-driven-V1-model-test
 ##### `run_simulation(cell, lgn_input, bkg_input, batch_size)`
 - **功能**: 执行神经网络仿真
 - **算法**: 逐时间步数值积分GLIF3动力学方程
+- **核心创新**: 使用`SparseLayerWithExternalBkg`处理真实的背景输入数据
+- **仿真流程**:
+  1. 准备LGN和背景输入的张量数据
+  2. 创建`SparseLayerWithExternalBkg`输入层
+  3. 逐时间步计算输入电流和神经元状态
+  4. 收集所有时间步的输出数据
 - **返回**: 仿真结果字典，包含：
   - `spikes`: 脉冲发放数据 (batch × time × neurons)
   - `voltages`: 膜电位轨迹 (batch × time × neurons)
   - `adaptive_currents`: 自适应电流
   - `psc_rise/psc`: 突触后电流
   - `spike_rates`: 每个神经元的平均发放率
+
+##### `_run_manual_simulation(cell, lgn_spikes, bkg_spikes, lgn_input, bkg_input, batch_size, n_timesteps)`
+- **功能**: 核心仿真循环，使用外部背景输入的逐时间步方法
+- **技术特点**:
+  - **真实背景输入**: 不同于原始工具包的随机噪声，使用真实的背景脉冲数据
+  - **分离输入处理**: LGN和背景输入通过不同的稀疏连接矩阵独立处理
+  - **动态电流合并**: 每个时间步动态合并LGN电流和背景电流
+- **计算优势**: 虽然计算复杂度较高，但提供了更高的生物学真实性
+- **调试友好**: 逐时间步的设计便于监控和调试神经元状态变化
 
 ##### `save_spikes_to_h5(simulation_results, network, output_file)`
 - **功能**: 将仿真结果保存为HDF5格式
