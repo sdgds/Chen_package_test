@@ -106,7 +106,7 @@ Training-data-driven-V1-model-test
   ##### `run_simulation(cell, lgn_input, bkg_input, batch_size)`
     - **功能**: 执行神经网络仿真
     - **算法**: 逐时间步数值积分GLIF3动力学方程
-    - **核心创新**: 使用`SparseLayerWithExternalBkg`处理真实的背景输入数据
+    - **核心改动**: 使用`SparseLayerWithExternalBkg`处理真实的背景输入数据
     - **仿真流程**:
         1. 准备LGN和背景输入的张量数据
         2. 创建`SparseLayerWithExternalBkg`输入层
