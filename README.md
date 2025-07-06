@@ -2,7 +2,7 @@
 
 ## 概述
 
-Chen Package Test是一个专门用于测试和验证[Training-data-driven-V1-model-test](https://github.com/ifgovh/Training-data-driven-V1-model-test)工具包的仿真测试框架。该工具包基于Allen研究所的小鼠V1（初级视觉皮层）模型，实现了GLIF3（广义漏积分发放）神经元模型的大规模网络仿真。
+Chen Package Test是一个专门用于测试和验证[Training-data-driven-V1-model](https://github.com/ifgovh/Training-data-driven-V1-model-test)工具包的仿真测试框架。该工具包基于Allen研究所的小鼠V1（初级视觉皮层）模型，实现了GLIF3（广义漏积分发放）神经元模型的大规模网络仿真。
 
 ## 数据准备
 
