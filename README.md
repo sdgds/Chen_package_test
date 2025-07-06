@@ -1,57 +1,10 @@
-# V1神经网络模型仿真测试工具包
+# Chen Package Test - V1模型仿真测试工具包
 
-本工具包提供了一套完整的解决方案，用于测试和验证基于Allen研究所小鼠V1（初级视觉皮层）模型的神经网络仿真功能。支持BMTK格式数据转换、多种仿真方法测试、交互式分析和可视化。
+## 概述
 
-## 🚀 主要功能
+Chen Package Test是一个专门用于测试和验证[Training-data-driven-V1-model-test](https://github.com/ifgovh/Training-data-driven-V1-model-test)工具包的仿真测试框架。该工具包基于Allen研究所的小鼠V1（初级视觉皮层）模型，实现了GLIF3（广义漏积分发放）神经元模型的大规模网络仿真。
 
-- **数据转换**: 将BMTK格式数据转换为PKL格式，便于Chen工具包导入和仿真
-- **神经网络仿真**: 基于GLIF3神经元模型的网络仿真
-- **交互式分析**: 按层级、细胞类型或空间位置选择和分析特定神经元
-
-## 📋 目录
-
-- [工具概述](#-工具概述)
-- [快速开始](#-快速开始)
-- [工具详解](#-工具详解)
-
-## 🔧 工具概述
-
-### 1. 数据转换工具 (`bmtk_to_pkl_converter.py`)
-
-**功能**: 将BMTK（Brain Modeling Toolkit）格式的V1模型数据转换为仿真所需的PKL格式。
-
-**输入**: BMTK格式数据（lgn和bkg输入spike，网络连接参数）  
-**输出**: `input_dat.pkl` 文件
-**注意**: `network_dat.pkl`使用Chen工具包中自带的
-
-### 2. 仿真测试工具 (`test_simulation.py`)
-
-**功能**: 主要的仿真测试脚本，支持大规模神经网络仿真。
-
-**特色**: 
-- 两种仿真方法：TensorFlow RNN层（高效）和逐时间步循环（易调试）
-- 支持自定义仿真参数（时长、时间步长、神经元数量等）
-- 按层级和细胞类型进行结果分析
-
-### 3. 交互式测试工具 (`interactive_test.py`)
-
-**功能**: 在仿真测试基础上增加交互功能，支持精细化分析。
-
-**特色**:
-- 按条件选择特定神经元群体
-- 详细的活动分析（发放率、同步性、膜电位统计等）
-- 数据导出功能（CSV/NPZ格式）
-
-### 4. 可视化工具 (`test_visualization.ipynb`)
-
-**功能**: Jupyter Notebook格式的可视化工具。
-
-**特色**:
-- 网络结构3D可视化
-- 神经活动动态展示
-- 交互式图表和分析
-
-### 数据准备
+## 数据准备
 
 确保您有以下格式的数据文件：
 
@@ -63,72 +16,251 @@ Training-data-driven-V1-model-test
         ├── network/                     # 网络结构文件
         ├── components/                  # 模型参数文件
         └── inputs/                      # 输入数据文件
-    ├── 测试工具包的所有文件
+    ├── test_simulation.py        # 主仿真测试脚本
+    ├── interactive_test.py       # 交互式测试工具
+    ├── bmtk_to_pkl_converter.py  # BMTK格式转换器
+    ├── test_visualization.ipynb  # Jupyter可视化notebook
+    └── README.md              
 ```
 
-## 🚀 快速开始
 
-### 1. 数据转换（如果您有BMTK格式数据）
+## 核心模块详解
+
+### 1. test_simulation.py - 主仿真测试模块
+
+#### V1SimulationTester类
+
+**功能**: 封装了V1模型的完整仿真测试流程
+
+**核心方法**:
+
+##### `__init__(data_dir, simulation_time, dt, seed)`
+- **功能**: 初始化仿真测试器
+- **参数**:
+  - `data_dir`: 数据目录路径（包含network_dat.pkl和input_dat.pkl）
+  - `simulation_time`: 仿真时长（毫秒，默认1000ms）
+  - `dt`: 时间步长（毫秒，默认1.0ms）
+  - `seed`: 随机种子（确保结果可重复）
+
+##### `load_network_and_input(n_neurons, core_only)`
+- **功能**: 加载网络结构和输入数据
+- **参数**:
+  - `n_neurons`: 使用的神经元数量（None表示使用所有）
+  - `core_only`: 是否只使用核心区域神经元（半径<400μm）
+- **返回**: 
+  - `network`: 网络结构字典，包含神经元参数、连接信息、空间坐标等
+  - `input_populations`: 输入信号列表[LGN输入, 背景输入]
+
+**网络结构包含**:
+- `n_nodes`: 神经元数量
+- `node_params`: 神经元参数（V_th阈值电位、g电导、E_L静息电位等）
+- `node_type_ids`: 每个神经元的类型ID
+- `synapses`: 突触连接信息（indices、weights、delays）
+- `x,y,z`: 神经元的3D空间坐标
+- `laminar_indices`: 按层和细胞类型的神经元索引
+
+##### `prepare_simulation(network, input_populations)`
+- **功能**: 准备仿真参数，创建BillehColumn神经元模型
+- **物理意义**: 配置GLIF3神经元的动力学参数和突触连接
+- **返回**: 
+  - `cell`: BillehColumn神经元模型
+  - `lgn_input`: LGN（外侧膝状体）输入数据
+  - `bkg_input`: 背景输入数据
+
+##### `run_simulation(cell, lgn_input, bkg_input, batch_size)`
+- **功能**: 执行神经网络仿真
+- **算法**: 逐时间步数值积分GLIF3动力学方程
+- **返回**: 仿真结果字典，包含：
+  - `spikes`: 脉冲发放数据 (batch × time × neurons)
+  - `voltages`: 膜电位轨迹 (batch × time × neurons)
+  - `adaptive_currents`: 自适应电流
+  - `psc_rise/psc`: 突触后电流
+  - `spike_rates`: 每个神经元的平均发放率
+
+##### `save_spikes_to_h5(simulation_results, network, output_file)`
+- **功能**: 将仿真结果保存为HDF5格式
+- **格式**: 与Allen研究所标准格式兼容
+- **结构**: 
+  ```
+  /spikes/v1/timestamps - 脉冲时间戳 (ms)
+  /spikes/v1/node_ids - 神经元节点ID
+  ```
+
+### 2. interactive_test.py - 交互式测试模块
+
+#### InteractiveV1Tester类
+
+**功能**: 继承V1SimulationTester，添加交互式功能
+
+**核心方法**:
+
+##### `select_neurons_by_criteria(network, layer, cell_type, spatial_region, neuron_ids)`
+- **功能**: 根据多种条件选择神经元
+- **选择条件**:
+  - `layer`: 皮层层级（'L1', 'L2', 'L3', 'L4', 'L5', 'L6'）
+  - `cell_type`: 细胞类型（'e'=兴奋性, 'i'=抑制性）
+  - `spatial_region`: 空间区域（x_min, x_max, z_min, z_max）单位微米
+  - `neuron_ids`: 直接指定神经元ID列表
+
+##### `analyze_selected_neurons(simulation_results, selected_indices, time_window)`
+- **功能**: 分析选定神经元的详细活动
+- **分析指标**:
+  - **发放率**: 每个神经元的平均发放频率（Hz）
+  - **变异系数(CV)**: 衡量发放规律性，CV = σ/μ
+  - **同步性指数**: 群体同步程度，反映网络协调性
+  - **膜电位统计**: 平均值、标准差、最值等
+
+##### `plot_detailed_activity(simulation_results, selected_indices, analysis)`
+- **功能**: 绘制详细的神经活动图
+- **图形内容**:
+  - **光栅图**: 脉冲发放的时空模式
+  - **群体发放率**: 时间演化的群体活动
+  - **发放率分布**: 神经元发放率的统计分布
+  - **CV分布**: 发放规律性的分布
+  - **膜电位轨迹**: 样本神经元的膜电位时间序列
+
+##### `export_neuron_data(simulation_results, neuron_id, output_file)`
+- **功能**: 导出单个神经元的详细数据
+- **支持格式**: NPZ（NumPy压缩）、CSV
+- **数据内容**: 脉冲时间、膜电位、自适应电流等
+
+### 3. bmtk_to_pkl_converter.py - 数据转换模块
+
+#### 功能概述
+将BMTK（Brain Modeling Toolkit）格式的网络数据转换为工具包兼容的PKL格式。
+
+#### 核心函数
+
+##### `convert_input_data(bmtk_dir, output_dir)`
+- **功能**: 转换输入数据（LGN和背景输入）
+- **处理步骤**:
+  1. 读取LGN节点信息和脉冲数据
+  2. 读取背景节点信息和脉冲数据
+  3. 构建连接权重矩阵
+  4. 保存为input_dat.pkl格式
+
+**输入数据结构**:
+- **LGN输入**: 模拟视觉刺激信号，通常包含方向选择性和时间动态
+- **背景输入**: 模拟大脑其他区域的输入，通常为泊松分布的随机脉冲
+
+## 神经科学原理
+
+### GLIF3神经元模型
+
+GLIF3（Generalized Leaky Integrate-and-Fire level 3）是Allen研究所开发的生物学真实神经元模型。
+
+#### 膜电位动力学方程
+```
+C_m * dV/dt = -g * (V - E_L) + I_syn + I_asc + I_ext
+```
+
+**参数物理意义**:
+- `C_m`: 膜电容（法拉德），决定膜电位变化的时间常数
+- `V`: 膜电位（毫伏）
+- `g`: 膜电导（西门子），决定静息状态的膜电阻
+- `E_L`: 静息电位（毫伏），神经元的平衡电位
+- `I_syn`: 突触电流（安培），来自其他神经元的输入
+- `I_asc`: 自适应电流（安培），包含两个分量，模拟钠钾泵等机制
+- `I_ext`: 外部输入电流（安培）
+
+#### 自适应电流动力学
+```
+dI_asc1/dt = -k1 * I_asc1 + A1 * δ(t - t_spike)
+dI_asc2/dt = -k2 * I_asc2 + A2 * δ(t - t_spike)
+```
+
+**物理意义**: 模拟神经元发放后的自适应过程，包括钠钾泵激活、钙依赖性钾通道开放等。
+
+#### 突触动力学
+
+**双指数突触后电流模型**:
+```
+I_syn = Σ_i PSC_i(t)
+PSC_i(t) = A * (exp(-t/τ_decay) - exp(-t/τ_rise))
+```
+
+**四种受体类型**:
+1. **AMPA**: 快速兴奋性，τ_rise ≈ 0.2ms, τ_decay ≈ 2ms
+2. **NMDA**: 慢速兴奋性，τ_rise ≈ 2ms, τ_decay ≈ 65ms
+3. **GABA_A**: 快速抑制性，τ_rise ≈ 0.2ms, τ_decay ≈ 8ms
+4. **GABA_B**: 慢速抑制性，τ_rise ≈ 3.5ms, τ_decay ≈ 260ms
+
+### 网络结构
+
+#### 皮层层级组织
+- **L1**: 主要包含树突和少量神经元
+- **L2/3**: 皮层间连接的主要源头
+- **L4**: 接收丘脑输入的主要层级
+- **L5**: 皮层输出的主要层级
+- **L6**: 反馈到丘脑的主要层级
+
+#### 细胞类型
+- **兴奋性神经元**: 释放谷氨酸，激活下游神经元
+- **抑制性神经元**: 释放GABA，抑制下游神经元
+
+## 使用指南
+
+### 基本使用
+
+```python
+from test_simulation import V1SimulationTester
+
+# 创建测试器
+tester = V1SimulationTester(
+    data_dir='Allen_V1_param',
+    simulation_time=1000,  # 1秒仿真
+    dt=1.0,               # 1毫秒时间步长
+    seed=42
+)
+
+# 加载网络和输入
+network, input_populations = tester.load_network_and_input(
+    n_neurons=1000,    # 使用1000个神经元
+    core_only=True     # 只使用核心区域
+)
+
+# 准备仿真
+cell, lgn_input, bkg_input = tester.prepare_simulation(network, input_populations)
+
+# 运行仿真
+results = tester.run_simulation(cell, lgn_input, bkg_input)
+```
+
+### 交互式使用
+
+```python
+from interactive_test import InteractiveV1Tester
+
+# 创建交互式测试器
+tester = InteractiveV1Tester(data_dir='Allen_V1_param')
+
+# 加载网络
+network, input_populations = tester.load_network_and_input()
+
+# 选择特定神经元（例如L4层兴奋性神经元）
+selected_indices = tester.select_neurons_by_criteria(
+    network, 
+    layer='L4', 
+    cell_type='e'
+)
+
+# 运行仿真
+cell, lgn_input, bkg_input = tester.prepare_simulation(network, input_populations)
+results = tester.run_simulation(cell, lgn_input, bkg_input)
+
+# 分析选定神经元
+analysis = tester.analyze_selected_neurons(results, selected_indices)
+
+# 绘制详细活动图
+tester.plot_detailed_activity(results, selected_indices, analysis, 'activity_plot.png')
+
+# 导出特定神经元数据
+tester.export_neuron_data(results, neuron_id=100, output_file='neuron_100.npz')
+```
+
+### 数据转换
 
 ```bash
-# 进入Chen_package_test文件夹，转换BMTK数据为PKL格式。这会自动把BMTK的lgn和bkg信号转换为pkl格式。
-python bmtk_to_pkl_converter.py Allen_V1_param Allen_V1_param
+# 将BMTK格式转换为PKL格式
+python bmtk_to_pkl_converter.py Allen_V1_param Converted_param
 ```
-
-### 2. 基础仿真测试
-
-```bash
-# 使用默认参数运行仿真
-python test_simulation.py Allen_V1_param results
-
-# 查看结果
-ls results/
-# simulation_results_20240101_120000.npz
-# analysis_results_20240101_120000.pkl
-```
-
-### 3. 交互式分析和可视化
-
-```bash
-# 启动Jupyter Notebook
-jupyter notebook test_visualization.ipynb
-```
-
-## 📖 工具详解
-
-### bmtk_to_pkl_converter.py
-
-```bash
-# 基本语法
-python bmtk_to_pkl_converter.py <input_dir> [output_dir]
-
-# 示例
-python bmtk_to_pkl_converter.py Allen_V1_param ./converted_data
-```
-
-**主要功能**:
-- 转换网络结构（神经元参数、连接权重）
-- 转换输入数据（LGN视觉输入、背景输入）
-
-### test_simulation.py
-
-```bash
-# 基本语法
-python test_simulation.py <data_dir> <output_dir> [选项]
-
-# 常用选项
---simulation-time 1000     # 仿真时长（毫秒）
---dt 1.0                   # 时间步长（毫秒）
---n-neurons 5000          # 神经元数量
---core-only                # 仅使用核心区域神经元
---use-rnn-layer           # 使用RNN层方法（更快）
---plot-activity           # 生成活动图
-```
-
-### interactive_test.py
-
-**分析功能**:
-- 发放率统计
-- 变异系数（CV）分析
-- 同步性指数
-- 膜电位统计
