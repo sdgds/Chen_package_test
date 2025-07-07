@@ -16,10 +16,11 @@ Training-data-driven-V1-model-test
         ├── network/                     # 网络结构文件
         ├── components/                  # 模型参数文件
         └── inputs/                      # 输入数据文件
-    ├── test_simulation.py        # 主仿真测试脚本
-    ├── interactive_test.py       # 交互式测试工具
-    ├── bmtk_to_pkl_converter.py  # BMTK格式转换器
-    ├── test_visualization.ipynb  # Jupyter可视化notebook
+    ├── test_simulation.py           # 主仿真测试脚本
+    ├── interactive_test.py          # 交互式测试工具
+    ├── bmtk_to_pkl_converter.py     # BMTK格式转换器
+    ├── neuron_response_analysis.py  # 神经元响应分析模块
+    ├── test_visualization.ipynb     # Jupyter可视化notebook
     └── README.md              
 ```
 
@@ -106,7 +107,7 @@ Training-data-driven-V1-model-test
   ##### `run_simulation(cell, lgn_input, bkg_input, batch_size)`
     - **功能**: 执行神经网络仿真
     - **算法**: 逐时间步数值积分GLIF3动力学方程
-    - **核心改动**: 使用`SparseLayerWithExternalBkg`处理真实的背景输入数据
+    - **核心创新**: 使用`SparseLayerWithExternalBkg`处理真实的背景输入数据
     - **仿真流程**:
         1. 准备LGN和背景输入的张量数据
         2. 创建`SparseLayerWithExternalBkg`输入层
@@ -201,6 +202,108 @@ Training-data-driven-V1-model-test
   **输入数据结构**:
     - **LGN输入**: 模拟视觉刺激信号，通常包含方向选择性和时间动态
     - **背景输入**: 模拟大脑其他区域的输入，通常为泊松分布的随机脉冲
+
+### 4️⃣ neuron_response_analysis.py - 神经元响应分析模块
+
+#### 功能概述
+
+  专门用于分析单个神经元在不同平台电流刺激下的膜电位和脉冲响应特性。该模块提供了完整的神经元电生理特性分析工具，支持17种不同的神经元类型，能够生成详细的响应图表和I-F（电流-发放频率）曲线。
+
+#### 核心功能
+
+  <details>
+  <summary><strong>📋 查看所有功能详情</strong></summary>
+
+  ##### `simulate_neuron_response(target_neuron_type, platform_current, model_path, T, dt, current_start, current_end)`
+    - **功能**: 模拟单个神经元在平台电流刺激下的完整响应过程
+    - **核心参数**:
+        - `target_neuron_type`: 目标神经元类型（支持17种类型）
+        - `platform_current`: 平台电流强度（nA）
+        - `T`: 总仿真时间（ms，默认1000ms）
+        - `dt`: 时间步长（ms，默认1.0ms）
+        - `current_start/end`: 电流刺激的起止时间（默认200-800ms）
+    - **返回数据**:
+        - `time`: 时间序列数组
+        - `current`: 输入电流时间序列
+        - `voltage`: 膜电位轨迹
+        - `spikes`: 脉冲发放序列（二进制）
+    - **技术特点**:
+        - **单神经元网络构建**: 动态构建包含单个目标神经元的最小网络
+        - **虚拟连接处理**: 使用极小权重的虚拟突触避免网络连接错误
+        - **逐时间步仿真**: 精确控制每个时间步的电流输入和状态更新
+
+  ##### `plot_single_response(time, current, voltage, spikes, neuron_type, current_amplitude)`
+    - **功能**: 绘制单个神经元的详细响应图
+    - **图形结构**:
+        - **上子图**: 输入电流波形，清晰显示平台电流的时间特性
+        - **下子图**: 膜电位轨迹与脉冲标记的叠加显示
+    - **可视化特性**:
+        - **脉冲标记**: 在脉冲发生时刻的膜电位位置添加红色竖线标记
+        - **统计信息**: 自动计算并显示脉冲总数和平均发放频率
+        - **中文支持**: 完整的中文标签和图例支持
+    - **输出信息**:
+        - 脉冲计数统计
+        - 发放频率计算（Hz）
+        - 响应延迟分析
+
+  ##### `analyze_current_response(neuron_type, current_amplitudes, model_path)`
+    - **功能**: 系统分析神经元在多个电流强度下的响应特性
+    - **分析流程**:
+        1. **多电流仿真**: 对每个电流强度独立进行完整仿真
+        2. **响应对比**: 生成12行1列的多子图布局
+        3. **统计分析**: 计算每个条件下的发放特性
+        4. **I-F曲线**: 自动生成电流-发放频率关系曲线
+    - **图形布局**:
+        - **第1行**: 所有电流强度的波形叠加显示
+        - **第2-12行**: 每个电流强度对应的膜电位响应
+    - **优化特性**:
+        - **紧凑布局**: 通过`hspace=0.3`和`pad=0.5`优化子图间距
+        - **颜色编码**: 使用viridis色彩映射区分不同电流强度
+        - **信息标注**: 每个子图包含电流值、脉冲数和发放频率
+
+  ##### `plot_if_curve(neuron_type, results)`
+    - **功能**: 绘制电流-发放频率（I-F）特性曲线
+    - **科学意义**: I-F曲线是神经元最重要的输入-输出特性之一
+    - **图形特性**:
+        - **数据点标注**: 每个数据点显示精确的发放频率值
+        - **趋势分析**: 清晰显示神经元的兴奋性阈值和饱和特性
+        - **生物学解释**: 反映神经元的内在兴奋性和适应特性
+
+  </details>
+
+#### 支持的神经元类型
+
+  该模块支持Allen研究所V1模型中的全部17种神经元类型：
+
+  **按皮层分布**:
+    - **L1层**: `i1Htr3a` - L1层抑制性神经元
+    - **L2/3层**: `e23`（兴奋性）, `i23Pvalb`, `i23Sst`, `i23Htr3a`（抑制性亚型）
+    - **L4层**: `e4`（兴奋性）, `i4Pvalb`, `i4Sst`, `i4Htr3a`（抑制性亚型）
+    - **L5层**: `e5`（兴奋性）, `i5Pvalb`, `i5Sst`, `i5Htr3a`（抑制性亚型）
+    - **L6层**: `e6`（兴奋性）, `i6Pvalb`, `i6Sst`, `i6Htr3a`（抑制性亚型）
+
+  **细胞类型特征**:
+    - **兴奋性神经元（e）**: 锥体细胞，释放谷氨酸，具有长距离投射
+    - **Pvalb抑制性神经元**: 快速放电，提供强抑制，主要调节网络同步
+    - **Sst抑制性神经元**: 树突靶向，调节输入整合
+    - **Htr3a抑制性神经元**: 多样化抑制，参与精细调节
+
+#### 技术实现特点
+
+  ##### 网络构建策略
+    - **最小网络原则**: 为每个神经元类型构建包含单个神经元的最小网络
+    - **虚拟连接处理**: 使用1e-9的极小权重避免零连接导致的计算错误
+    - **参数隔离**: 确保每个神经元类型使用其特定的GLIF3参数
+
+  ##### 仿真精度控制
+    - **时间步长**: 默认1ms时间步长，确保膜电位动力学的精确积分
+    - **电流控制**: 精确控制平台电流的起止时间和幅度
+    - **状态管理**: 正确初始化和维护神经元的所有动力学状态
+
+  ##### 可视化优化
+    - **中文字体**: 自动配置SimHei等中文字体支持
+    - **图形布局**: 优化的子图间距和标签布局
+    - **颜色方案**: 科学的颜色映射和对比度设计
 
 ---
 
@@ -325,6 +428,33 @@ Training-data-driven-V1-model-test
 
   # 导出特定神经元数据
   tester.export_neuron_data(results, neuron_id=100, output_file='neuron_100.npz')
+  ```
+
+### 神经元响应分析
+
+  ```python
+  from neuron_response_analysis import (
+      simulate_neuron_response, 
+      plot_single_response, 
+      analyze_current_response
+  )
+
+  # 单个神经元响应分析
+  time, current, voltage, spikes = simulate_neuron_response(
+      target_neuron_type='e4',     # L4层兴奋性神经元
+      platform_current=0.1,       # 0.1 nA电流刺激
+      model_path='../GLIF_network/network_dat.pkl'
+  )
+
+  # 绘制单个响应图
+  plot_single_response(time, current, voltage, spikes, 'e4', 0.1)
+
+  # 多电流强度分析（生成I-F曲线）
+  current_amplitudes = np.linspace(-0.25, 0.25, 11)  # -0.25到0.25 nA，11个点
+  results = analyze_current_response(
+      neuron_type='i4Pvalb',       # L4层Pvalb抑制性神经元
+      current_amplitudes=current_amplitudes
+  )
   ```
 
 ### 数据转换
