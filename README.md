@@ -4,6 +4,12 @@
 
 Chen Package Test是一个专门用于测试和验证[Training-data-driven-V1-model-test](https://github.com/ifgovh/Training-data-driven-V1-model-test)工具包的仿真测试框架。该工具包基于Allen研究所的小鼠V1（初级视觉皮层）模型，实现了GLIF3（广义漏积分发放）神经元模型的大规模网络仿真。
 
+**核心特性**：
+- 支持大规模V1网络仿真和单神经元电生理特性分析
+- 提供两种仿真引擎：TensorFlow（网络仿真）和NEST（高精度单神经元分析）
+- 兼容111种不同的神经元类型，覆盖全部皮层层级和细胞类型
+- 包含完整的数据转换、可视化和分析工具链
+
 ## 📁 数据准备
 
 确保您有以下格式的数据文件：
@@ -20,6 +26,7 @@ Training-data-driven-V1-model-test
     ├── interactive_test.py          # 交互式测试工具
     ├── bmtk_to_pkl_converter.py     # BMTK格式转换器
     ├── neuron_response_analysis.py  # 神经元响应分析模块
+    ├── test_NEST_neuron.ipynb       # NEST神经元仿真测试notebook
     ├── test_visualization.ipynb     # Jupyter可视化notebook
     └── README.md              
 ```
@@ -305,6 +312,147 @@ Training-data-driven-V1-model-test
     - **图形布局**: 优化的子图间距和标签布局
     - **颜色方案**: 科学的颜色映射和对比度设计
 
+### 5️⃣ test_NEST_neuron.ipynb - NEST神经元仿真测试
+
+#### 功能概述
+
+  基于NEST仿真器实现的神经元响应分析工具，与`test_visualization.ipynb`中的第0部分（测试Chen神经元仿真）相对应。该Jupyter notebook提供了使用NEST仿真器进行单神经元电生理特性分析的完整工具链，支持111种不同的神经元类型，是对Chen神经元仿真的NEST版本实现。
+
+#### 核心功能
+
+  <details>
+  <summary><strong>📋 查看NEST仿真功能详情</strong></summary>
+
+  ##### `chen_to_bmtk_mapping_dict(chen_network_path, bmtk_nodes_path)`
+    - **功能**: 建立Chen 111个神经元模板与BMTK 111个神经元模板之间的对应关系
+    - **输入参数**:
+        - `chen_network_path`: Chen网络数据文件路径（默认：'Allen_V1_param/network_dat.pkl'）
+        - `bmtk_nodes_path`: BMTK节点数据文件路径（默认：'Allen_V1_param/network/v1_nodes.h5'）
+    - **返回值**: 包含Chen索引到BMTK node_type_id映射的字典
+    - **技术特点**:
+        - 通过Chen网络中的神经元ID列表查找对应的BMTK节点类型
+        - 严格验证一对一映射关系，确保数据完整性
+        - 支持111种不同的神经元类型映射
+
+  ##### `simulate_neuron_response(node_type_id, platform_current, T, dt, current_start, current_end)`
+    - **功能**: 使用NEST仿真器模拟单个神经元的平台电流响应
+    - **核心参数**:
+        - `node_type_id`: BMTK节点类型ID
+        - `platform_current`: 平台电流强度（单位：pA）
+        - `T`: 仿真时间（ms，默认1000ms）
+        - `dt`: 时间步长（ms，默认0.1ms）
+        - `current_start/end`: 电流刺激的起止时间（默认200-800ms）
+    - **技术实现**:
+        - 使用NEST的`glif_psc`模型
+        - 从JSON文件加载神经元动力学参数
+        - 通过`dc_generator`注入恒定电流
+        - 使用`multimeter`记录膜电位变化
+    - **返回数据**:
+        - `time`: 时间序列数组
+        - `current_sequence`: 输入电流时间序列
+        - `voltages`: 膜电位轨迹
+        - `spikes`: 脉冲发放序列（通过膜电位梯度检测）
+
+  ##### `plot_single_response(time, current, voltage, spikes, neuron_type, current_amplitude)`
+    - **功能**: 绘制单个神经元的详细响应图
+    - **图形结构**:
+        - **上子图**: 输入电流波形，显示平台电流的时间特性
+        - **下子图**: 膜电位轨迹与脉冲标记的叠加显示
+    - **可视化特性**:
+        - 脉冲检测：通过膜电位梯度变化（< -5 mV/ms）自动识别脉冲
+        - 统计信息：显示脉冲总数和平均发放频率
+        - 标记系统：在脉冲发生时刻添加红色竖线标记
+
+  ##### `analyze_current_response(node_type_id, current_amplitudes, T, dt, current_start, current_end)`
+    - **功能**: 系统分析神经元在多个电流强度下的响应特性
+    - **分析流程**:
+        1. 对每个电流强度独立进行NEST仿真
+        2. 生成多子图布局显示所有条件下的响应
+        3. 自动计算发放统计量和I-F特性
+        4. 调用`plot_if_curve`生成电流-发放频率曲线
+    - **输出特性**:
+        - 多子图显示：第一行显示所有电流波形，后续行显示对应的膜电位响应
+        - 颜色编码：使用viridis色彩映射区分不同电流强度
+        - 统计标注：每个子图包含电流值、脉冲数和发放频率信息
+
+  ##### `plot_if_curve(neuron_type, results)`
+    - **功能**: 绘制电流-发放频率（I-F）特性曲线
+    - **科学意义**: 反映神经元的输入-输出转换特性和兴奋性阈值
+    - **可视化特点**:
+        - 数据点标注：显示每个电流强度对应的精确发放频率
+        - 趋势分析：清晰展示神经元的阈值特性和饱和行为
+
+  </details>
+
+#### 使用方法
+
+  ##### 环境准备
+    ```bash
+    # 确保安装NEST仿真器
+    pip install nest-simulator
+    
+    # 启动Jupyter notebook
+    jupyter notebook test_NEST_neuron.ipynb
+    ```
+
+  ##### 基本使用流程
+    ```python
+    # 1. 建立Chen到BMTK的映射关系
+    chen_to_bmtk_mapping = chen_to_bmtk_mapping_dict()
+    
+    # 2. 选择目标神经元类型
+    chen_neuron_model_template_index = 110  # Chen模板索引
+    node_type_id = chen_to_bmtk_mapping[chen_neuron_model_template_index]
+    
+    # 3. 单电流响应测试
+    time, current, voltage, spikes = simulate_neuron_response(
+        node_type_id=node_type_id, 
+        platform_current=200  # 200 pA
+    )
+    
+    # 4. 绘制响应图
+    plot_single_response(time, current, voltage, spikes, node_type_id, 200)
+    
+    # 5. 多电流强度分析
+    current_amplitudes = np.array([0, 30, 40, 50, 60, 70, 100, 130, 170, 200, 250])
+    results = analyze_current_response(
+        node_type_id=node_type_id,
+        current_amplitudes=current_amplitudes
+    )
+    ```
+
+#### 技术特点
+
+  ##### NEST仿真器优势
+    - **高精度**: 0.1ms时间步长，提供高精度的动力学仿真
+    - **生物学真实性**: 使用Allen研究所标准的GLIF模型参数
+    - **高效计算**: NEST优化的C++内核，适合大规模仿真
+    - **标准化**: 遵循计算神经科学的标准仿真协议
+
+  ##### 与Chen仿真的对比
+    
+    | 特性 | Chen仿真 (TensorFlow) | NEST仿真 |
+    |------|---------------------|----------|
+    | **仿真引擎** | TensorFlow | NEST |
+    | **时间步长** | 1.0 ms | 0.1 ms |
+    | **精度** | 中等 | 高精度 |
+    | **电流单位** | nA | pA |
+    | **脉冲检测** | 阈值越过 | 膜电位梯度 |
+    | **适用场景** | 网络仿真 | 单神经元精确分析 |
+
+  ##### 数据流程
+    1. **模型映射**: Chen索引 → BMTK node_type_id
+    2. **参数加载**: 从JSON文件读取GLIF模型参数
+    3. **NEST仿真**: 创建模型、注入电流、记录响应
+    4. **脉冲检测**: 通过膜电位梯度识别动作电位
+    5. **结果可视化**: 生成响应图和I-F曲线
+
+  ##### 数据依赖
+    - **Allen_V1_param/network_dat.pkl**: Chen网络数据
+    - **Allen_V1_param/network/v1_nodes.h5**: BMTK节点数据
+    - **Allen_V1_param/network/v1_node_types.csv**: 节点类型定义
+    - **Allen_V1_param/components/cell_models/nest_models/**: NEST模型参数文件
+
 ---
 
 ## 🧠 神经科学原理
@@ -432,6 +580,7 @@ Training-data-driven-V1-model-test
 
 ### 神经元响应分析
 
+  #### Chen神经元仿真（TensorFlow）
   ```python
   from neuron_response_analysis import (
       simulate_neuron_response, 
@@ -456,6 +605,38 @@ Training-data-driven-V1-model-test
       current_amplitudes=current_amplitudes
   )
   ```
+
+  #### NEST神经元仿真
+  ```python
+  # 在test_NEST_neuron.ipynb中运行
+  
+  # 建立Chen到BMTK映射
+  chen_to_bmtk_mapping = chen_to_bmtk_mapping_dict()
+  
+  # 选择神经元类型
+  chen_neuron_model_template_index = 110  # Chen模板索引
+  node_type_id = chen_to_bmtk_mapping[chen_neuron_model_template_index]
+  
+  # 单电流响应测试
+  time, current, voltage, spikes = simulate_neuron_response(
+      node_type_id=node_type_id, 
+      platform_current=200  # 200 pA
+  )
+  
+  # 绘制响应图
+  plot_single_response(time, current, voltage, spikes, node_type_id, 200)
+  
+  # 多电流强度分析
+  current_amplitudes = np.array([0, 30, 40, 50, 60, 70, 100, 130, 170, 200, 250])
+  results = analyze_current_response(
+      node_type_id=node_type_id,
+      current_amplitudes=current_amplitudes
+  )
+  ```
+
+  #### 两种仿真方法的选择建议
+    - **Chen仿真（TensorFlow）**: 适合快速原型和网络仿真
+    - **NEST仿真**: 适合精确的单神经元分析和电生理特性研究
 
 ### 数据转换
 
