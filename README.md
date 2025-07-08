@@ -17,19 +17,19 @@ Chen Package Test是一个专门用于测试和验证[Training-data-driven-V1-mo
 ```mermaid
 graph TD
     %% 数据源
-    BMTK["BMTK原始数据<br/>Allen_V1_param/<br/>• network/v1_nodes.h5<br/>• network/v1_node_types.csv<br/>• components/cell_models/"]
+    BMTK["BMTK原始数据<br/>Allen_V1_param/<br/>• network/v1_nodes.h5<br/>• components/cell_models/<br/>• network_dat.pkl"]
     
     %% 数据转换工具
     subgraph DataConv ["🔄 数据转换工具"]
-        Converter["bmtk_to_pkl_converter.py<br/>BMTK → PKL转换器<br/>• 网络结构转换<br/>• 输入数据转换"]
+        Converter["bmtk_to_pkl_converter.py<br/>BMTK → PKL转换器<br/>• 输入数据转换"]
     end
     
     %% 转换后的数据
-    PKL["PKL格式数据<br/>• network_dat.pkl<br/>• input_dat.pkl"]
+    PKL["PKL格式数据<br/>• input_dat.pkl"]
     
     %% 单神经元分析工具
     subgraph SingleNeuron ["🧪 单神经元分析工具"]
-        ChenSim["neuron_response_analysis.py<br/>Chen神经元仿真 (TensorFlow)<br/>• 平台电流刺激<br/>• I-F曲线分析<br/>• 17种神经元类型"]
+        ChenSim["neuron_response_analysis.py<br/>Chen神经元仿真 (TensorFlow)<br/>• 平台电流刺激<br/>• I-F曲线分析<br/>• 111种神经元类型"]
         NESTSim["test_NEST_neuron.ipynb<br/>NEST神经元仿真<br/>• 高精度仿真 (0.1ms)<br/>• Chen-BMTK映射<br/>• 111种神经元类型"]
     end
     
@@ -65,12 +65,6 @@ graph TD
     NESTSim -.->|结果展示| VisNB
     BasicSim -.->|结果展示| VisNB
     InteractiveSim -.->|结果展示| VisNB
-    
-    %% 输出结果
-    ChenSim --> Results1["• 膜电位轨迹<br/>• I-F曲线图<br/>• 响应统计"]
-    NESTSim --> Results2["• 高精度膜电位<br/>• 脉冲检测<br/>• 参数对比"]
-    BasicSim --> Results3["• 网络脉冲数据<br/>• HDF5格式输出<br/>• 群体活动"]
-    InteractiveSim --> Results4["• 选择性分析<br/>• 详细可视化<br/>• 数据导出"]
     
     %% 样式设置
     classDef dataClass fill:#e1f5fe,stroke:#01579b,stroke-width:2px
