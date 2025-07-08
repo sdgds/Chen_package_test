@@ -20,7 +20,7 @@ graph TD
     BMTK["BMTK原始数据<br/>Allen_V1_param/<br/>• network/v1_nodes.h5<br/>• components/cell_models/<br/>• network_dat.pkl"]
     
     %% 数据转换工具
-    subgraph DataConv ["🔄 数据转换工具"]
+    subgraph DataConv ["1️⃣ 数据转换工具"]
         Converter["bmtk_to_pkl_converter.py<br/>BMTK → PKL转换器<br/>• 输入数据转换"]
     end
     
@@ -28,13 +28,13 @@ graph TD
     PKL["PKL格式数据<br/>• input_dat.pkl"]
     
     %% 单神经元分析工具
-    subgraph SingleNeuron ["🧪 单神经元分析工具"]
+    subgraph SingleNeuron ["2️⃣3️⃣ 单神经元分析工具"]
         ChenSim["neuron_response_analysis.py<br/>Chen神经元仿真 (TensorFlow)<br/>• 平台电流刺激<br/>• I-F曲线分析<br/>• 111种神经元类型"]
         NESTSim["test_NEST_neuron.ipynb<br/>NEST神经元仿真<br/>• 高精度仿真 (0.1ms)<br/>• Chen-BMTK映射<br/>• 111种神经元类型"]
     end
     
     %% 网络仿真工具
-    subgraph NetworkSim ["🌐 网络仿真工具"]
+    subgraph NetworkSim ["4️⃣5️⃣ 网络仿真工具"]
         BasicSim["test_simulation.py<br/>基础网络仿真<br/>• V1SimulationTester<br/>• SparseLayerWithExternalBkg<br/>• 大规模网络仿真"]
         InteractiveSim["interactive_test.py<br/>交互式网络分析<br/>• InteractiveV1Tester<br/>• 神经元选择与分析<br/>• 可视化与导出"]
     end
