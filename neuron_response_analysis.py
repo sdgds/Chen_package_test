@@ -22,14 +22,14 @@ from models import BillehColumn
 plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
 
-def simulate_neuron_response(target_neuron_type, platform_current, 
+def simulate_neuron_response(neuron_model_template_index, platform_current, 
                            model_path='../GLIF_network/network_dat.pkl',
                            T=1000, dt=1.0, current_start=200, current_end=800):
     """
     模拟单个神经元在平台电流刺激下的响应
     
     参数:
-    - target_neuron_type: 目标神经元类型 (如 'i1Htr3a', 'e4' 等)
+    - neuron_model_template_index: 目标神经元模板索引 (从0到111)
     - platform_current: 平台电流强度 (nA)
     - model_path: 模型文件路径
     - T: 总仿真时间步数 (ms)
@@ -44,21 +44,13 @@ def simulate_neuron_response(target_neuron_type, platform_current,
     - spikes: 脉冲序列 (0或1)
     """
     
-    # 神经元类型映射
-    neuron_pop_id_to_name = [
-        'i1Htr3a', 'e23', 'i23Pvalb', 'i23Sst', 'i23Htr3a',
-        'e4', 'i4Pvalb', 'i4Sst', 'i4Htr3a',
-        'e5', 'i5Pvalb', 'i5Sst', 'i5Htr3a',
-        'e6', 'i6Pvalb', 'i6Sst', 'i6Htr3a'
-    ]
-    
     # 读取模型文件
     with open(model_path, 'rb') as f:
         d = pkl.load(f)
     
-    def build_single_type_network(node_type_idx, n_neurons=1):
+    def build_single_type_network(neuron_model_template_index, n_neurons=1):
         """构建单一类型神经元网络"""
-        node_params = {k: np.array([v]) for k, v in d['nodes'][node_type_idx]['params'].items()}
+        node_params = {k: np.array([v]) for k, v in d['nodes'][neuron_model_template_index]['params'].items()}
         
         # 添加虚拟突触连接
         indices = np.array([[0, 0]], dtype=np.int64)
@@ -88,15 +80,10 @@ def simulate_neuron_response(target_neuron_type, platform_current,
         return input_population, bkg_weights
     
     # 获取神经元类型索引
-    try:
-        idx = neuron_pop_id_to_name.index(target_neuron_type)
-    except ValueError:
-        raise ValueError(f"未知的神经元类型: {target_neuron_type}. 可用类型: {neuron_pop_id_to_name}")
-    
-    print(f"正在模拟神经元类型: {target_neuron_type} (索引 {idx}), 电流强度: {platform_current} nA")
+    print(f"正在模拟神经元类型: {neuron_model_template_index}, 电流强度: {platform_current} nA")
     
     # 构建网络和输入
-    network = build_single_type_network(idx)
+    network = build_single_type_network(neuron_model_template_index)
     input_population, bkg_weights = build_dummy_input(1)
     
     # 创建神经元模型
