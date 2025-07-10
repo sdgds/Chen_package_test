@@ -135,20 +135,9 @@ class SingleNeuronModel:
         normalizer = self.v_th - self.e_l
         v_sc = (new_v - self.v_th) / normalizer
         
-        # # 使用spike_gauss函数的逻辑
-        # new_z = 1 if v_sc > 0 else 0
-        
-        # # 在不应期内不能产生spike (与BillehColumn完全一致)
-        # if new_r > 0:
-        #     new_z = 0
-
-        # 使用简化的spike机制 (与BillehColumn的逻辑一致)
-        # 当v_sc > 0时产生spike
-        new_z = 1.0 if v_sc > 0 else 0.0
-        
-        # 在不应期内不能产生spike
-        if new_r > 0:
-            new_z = 0.0
+        # # 使用spike_gauss函数的逻辑 (与BillehColumn完全一致)
+        new_z = spike_gauss(v_sc, self._gauss_std, self._dampening_factor)        
+        new_z = tf.where(new_r > 0., tf.zeros_like(new_z), new_z)
         
         # 更新状态
         self.psc_rise = new_psc_rise
