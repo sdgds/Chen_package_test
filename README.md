@@ -29,7 +29,7 @@ graph TD
     
     %% 单神经元分析工具
     subgraph SingleNeuron ["2️⃣3️⃣ 单神经元分析工具"]
-        ChenSim["neuron_response_analysis.py<br/>Chen神经元仿真 (TensorFlow)<br/>• 平台电流刺激<br/>• I-F曲线分析<br/>• 111种神经元类型"]
+        ChenSim["neuron_response_analysis.py<br/>Chen神经元仿真 (TensorFlow)<br/>• SingleNeuronModel类<br/>• 平台电流刺激<br/>• I-F曲线分析<br/>• 111种神经元类型"]
         NESTSim["test_NEST_neuron.ipynb<br/>NEST神经元仿真<br/>• 高精度仿真 (0.1ms)<br/>• Chen-BMTK映射<br/>• 111种神经元类型"]
     end
     
@@ -151,23 +151,30 @@ Training-data-driven-V1-model-test
   <details>
   <summary><strong>📋 查看所有功能详情</strong></summary>
 
-  ##### `simulate_neuron_response(target_neuron_type, platform_current, model_path, T, dt, current_start, current_end)`
+  ##### `SingleNeuronModel`类
+    - **功能**: 基于BillehColumn动力学的单神经元模型，完全保持相同的动力学机制
+    - **核心参数**:
+        - `neuron_model_template_index`: 目标神经元类型索引（支持111种类型）
+        - `model_path`: 模型文件路径（默认：'../GLIF_network/network_dat.pkl'）
+        - `dt`: 时间步长（ms，默认1.0ms）
+        - `gauss_std`: 高斯伪导数标准差（默认0.5）
+        - `dampening_factor`: 阻尼因子（默认0.3）
+    - **技术特点**:
+        - **完全兼容**: 与BillehColumn使用相同的参数处理和动力学方程
+        - **电压归一化**: 应用与BillehColumn完全一致的电压缩放处理
+        - **状态管理**: 维护神经元的所有动力学状态（膜电位、不应期、自适应电流等）
+
+  ##### `SingleNeuronModel.simulate(T, platform_current, current_start, current_end)`
     - **功能**: 模拟单个神经元在平台电流刺激下的完整响应过程
     - **核心参数**:
-        - `target_neuron_type`: 目标神经元类型（支持17种类型）
-        - `platform_current`: 平台电流强度（nA）
-        - `T`: 总仿真时间（ms，默认1000ms）
-        - `dt`: 时间步长（ms，默认1.0ms）
-        - `current_start/end`: 电流刺激的起止时间（默认200-800ms）
+        - `T`: 总仿真时间（ms）
+        - `platform_current`: 平台电流强度（pA）
+        - `current_start/end`: 电流刺激的起止时间
     - **返回数据**:
         - `time`: 时间序列数组
-        - `current`: 输入电流时间序列
-        - `voltage`: 膜电位轨迹
+        - `current_sequence`: 输入电流时间序列
+        - `voltages`: 膜电位轨迹
         - `spikes`: 脉冲发放序列（二进制）
-    - **技术特点**:
-        - **单神经元网络构建**: 动态构建包含单个目标神经元的最小网络
-        - **虚拟连接处理**: 使用极小权重的虚拟突触避免网络连接错误
-        - **逐时间步仿真**: 精确控制每个时间步的电流输入和状态更新
 
   ##### `plot_single_response(time, current, voltage, spikes, neuron_type, current_amplitude)`
     - **功能**: 绘制单个神经元的详细响应图
@@ -183,37 +190,38 @@ Training-data-driven-V1-model-test
         - 发放频率计算（Hz）
         - 响应延迟分析
 
-  ##### `analyze_current_response(neuron_type, current_amplitudes, model_path)`
+  ##### `analyze_current_response(neuron_type, neuron, T, current_amplitudes, current_start, current_end)`
     - **功能**: 系统分析神经元在多个电流强度下的响应特性
     - **分析流程**:
         1. **多电流仿真**: 对每个电流强度独立进行完整仿真
-        2. **响应对比**: 生成12行1列的多子图布局
+        2. **响应对比**: 生成多子图布局显示所有条件下的响应
         3. **统计分析**: 计算每个条件下的发放特性
         4. **I-F曲线**: 自动生成电流-发放频率关系曲线
     - **图形布局**:
         - **第1行**: 所有电流强度的波形叠加显示
-        - **第2-12行**: 每个电流强度对应的膜电位响应
+        - **后续行**: 每个电流强度对应的膜电位响应
     - **优化特性**:
         - **紧凑布局**: 通过`hspace=0.3`和`pad=0.5`优化子图间距
         - **颜色编码**: 使用viridis色彩映射区分不同电流强度
         - **信息标注**: 每个子图包含电流值、脉冲数和发放频率
 
-  ##### `plot_if_curve(neuron_type, results)`
+  ##### `plot_if_curve(neuron_type, results, save_dir=None)`
     - **功能**: 绘制电流-发放频率（I-F）特性曲线
     - **科学意义**: I-F曲线是神经元最重要的输入-输出特性之一
     - **图形特性**:
         - **数据点标注**: 每个数据点显示精确的发放频率值
         - **趋势分析**: 清晰显示神经元的兴奋性阈值和饱和特性
         - **生物学解释**: 反映神经元的内在兴奋性和适应特性
+    - **保存功能**: 支持将I-F曲线保存为PNG格式
 
   </details>
 
 #### 技术实现
 
-  ##### 网络构建策略
-    - **最小网络原则**: 为每个神经元类型构建包含单个神经元的最小网络
-    - **虚拟连接处理**: 使用1e-9的极小权重避免零连接导致的计算错误
-    - **参数隔离**: 确保每个神经元类型使用其特定的GLIF3参数
+  ##### 动力学兼容性
+    - **参数处理**: 与BillehColumn使用完全相同的参数加载和预处理流程
+    - **电压归一化**: 应用相同的电压缩放和偏移处理
+    - **动力学方程**: 使用相同的GLIF3动力学方程和状态更新规则
 
   ##### 仿真精度控制
     - **时间步长**: 默认1ms时间步长，确保膜电位动力学的精确积分
@@ -224,7 +232,7 @@ Training-data-driven-V1-model-test
 
 #### 功能概述
 
-  基于NEST仿真器实现的神经元响应分析工具，与`test_visualization.ipynb`中的第0部分（测试Chen神经元仿真）相对应。该Jupyter notebook提供了使用NEST仿真器进行单神经元电生理特性分析的完整工具链，支持111种不同的神经元类型，是对Chen神经元仿真的NEST版本实现。
+  基于NEST仿真器实现的神经元响应分析工具，与`neuron_response_analysis.py`中的Chen神经元仿真相对应。该Jupyter notebook提供了使用NEST仿真器进行单神经元电生理特性分析的完整工具链，支持111种不同的神经元类型，是对Chen神经元仿真的NEST版本实现。
 
 #### 核心功能
 
@@ -338,7 +346,7 @@ Training-data-driven-V1-model-test
     | **仿真引擎** | TensorFlow | NEST |
     | **时间步长** | 1.0 ms | 0.1 ms |
     | **精度** | 中等 | 高精度 |
-    | **电流单位** | nA | pA |
+    | **电流单位** | pA | pA |
     | **脉冲检测** | 阈值越过 | 膜电位梯度 |
     | **适用场景** | 网络仿真 | 单神经元精确分析 |
 
@@ -435,14 +443,17 @@ Training-data-driven-V1-model-test
         - `lgn_input`: LGN（外侧膝状体）输入数据
         - `bkg_input`: 背景输入数据
 
-  ##### `run_simulation(cell, lgn_input, bkg_input, batch_size)`
+  ##### `run_simulation(cell, lgn_input, bkg_input, batch_size, sparselayer_externalbkg, use_rnn_layer)`
     - **功能**: 执行神经网络仿真
-    - **算法**: 逐时间步数值积分GLIF3动力学方程
+    - **算法**: 支持两种仿真模式：逐时间步方法和TensorFlow RNN层方法
     - **核心创新**: 使用`SparseLayerWithExternalBkg`处理真实的背景输入数据
+    - **参数**:
+        - `sparselayer_externalbkg`: 是否使用外部背景输入（True/False）
+        - `use_rnn_layer`: 是否使用TensorFlow RNN层（True/False）
     - **仿真流程**:
         1. 准备LGN和背景输入的张量数据
-        2. 创建`SparseLayerWithExternalBkg`输入层
-        3. 逐时间步计算输入电流和神经元状态
+        2. 创建输入层（SparseLayer或SparseLayerWithExternalBkg）
+        3. 选择仿真方法（逐时间步或RNN层）
         4. 收集所有时间步的输出数据
     - **返回**: 仿真结果字典，包含：
         - `spikes`: 脉冲发放数据 (batch × time × neurons)
@@ -451,7 +462,7 @@ Training-data-driven-V1-model-test
         - `psc_rise/psc`: 突触后电流
         - `spike_rates`: 每个神经元的平均发放率
 
-  ##### `_run_manual_simulation(cell, lgn_spikes, bkg_spikes, lgn_input, bkg_input, batch_size, n_timesteps)`
+  ##### `_run_manual_simulation(cell, lgn_spikes, bkg_spikes, lgn_input, bkg_input, batch_size, n_timesteps, sparselayer_externalbkg)`
     - **功能**: 核心仿真循环，使用外部背景输入的逐时间步方法
     - **技术特点**:
         - **真实背景输入**: 不同于原始工具包的随机噪声，使用真实的背景脉冲数据
@@ -460,7 +471,14 @@ Training-data-driven-V1-model-test
     - **计算优势**: 虽然计算复杂度较高，但提供了更高的生物学真实性
     - **调试友好**: 逐时间步的设计便于监控和调试神经元状态变化
 
-  ##### `save_spikes_to_h5(simulation_results, network, output_file)`
+  ##### `_run_rnn_simulation(cell, lgn_spikes, bkg_spikes, lgn_input, bkg_input, batch_size, n_timesteps, sparselayer_externalbkg)`
+    - **功能**: 使用TensorFlow RNN层的仿真方法
+    - **技术特点**:
+        - **兼容性处理**: 通过CompatibleRNNCell解决状态形状不匹配问题
+        - **高效计算**: 利用TensorFlow的图优化和并行计算
+        - **状态管理**: 自动处理RNN状态初始化和传递
+
+  ##### `save_spikes_to_h5(simulation_results, network, output_file, selected_indices, metadata)`
     - **功能**: 将仿真结果保存为HDF5格式
     - **格式**: 与Allen研究所标准格式兼容
     - **结构**: 
@@ -593,26 +611,37 @@ Training-data-driven-V1-model-test
   #### Chen神经元仿真（TensorFlow）
   ```python
   from neuron_response_analysis import (
-      simulate_neuron_response, 
+      SingleNeuronModel, 
       plot_single_response, 
       analyze_current_response
   )
 
-  # 单个神经元响应分析
-  time, current, voltage, spikes = simulate_neuron_response(
-      target_neuron_type='e4',     # L4层兴奋性神经元
-      platform_current=0.1,       # 0.1 nA电流刺激
+  # 创建单神经元模型
+  neuron = SingleNeuronModel(
+      neuron_model_template_index=110,  # 神经元类型索引
       model_path='../GLIF_network/network_dat.pkl'
   )
 
+  # 单个神经元响应分析
+  time, current, voltage, spikes = neuron.simulate(
+      T=1000,              # 1000ms仿真时间
+      platform_current=100, # 100 pA电流刺激
+      current_start=200,    # 200ms开始刺激
+      current_end=800       # 800ms结束刺激
+  )
+
   # 绘制单个响应图
-  plot_single_response(time, current, voltage, spikes, 'e4', 0.1)
+  plot_single_response(time, current, voltage, spikes, 'neuron_110', 100)
 
   # 多电流强度分析（生成I-F曲线）
-  current_amplitudes = np.linspace(-0.25, 0.25, 11)  # -0.25到0.25 nA，11个点
+  current_amplitudes = np.array([0, 30, 40, 50, 60, 70, 100, 130, 170, 200, 250])
   results = analyze_current_response(
-      neuron_type='i4Pvalb',       # L4层Pvalb抑制性神经元
-      current_amplitudes=current_amplitudes
+      neuron_type='neuron_110',
+      neuron=neuron,
+      T=1000,
+      current_amplitudes=current_amplitudes,
+      current_start=200,
+      current_end=800
   )
   ```
 
@@ -667,8 +696,12 @@ Training-data-driven-V1-model-test
   # 准备仿真
   cell, lgn_input, bkg_input = tester.prepare_simulation(network, input_populations)
 
-  # 运行仿真
-  results = tester.run_simulation(cell, lgn_input, bkg_input)
+  # 运行仿真（使用外部背景输入）
+  results = tester.run_simulation(
+      cell, lgn_input, bkg_input, 
+      sparselayer_externalbkg=True,  # 使用外部背景输入
+      use_rnn_layer=False           # 使用逐时间步方法
+  )
   ```
 
   #### 交互式网络分析
