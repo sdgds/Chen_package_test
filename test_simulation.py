@@ -27,7 +27,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 导入工具包中的关键模块
 from load_sparse import load_network, load_input, set_laminar_indices
-from models import BillehColumn
+from models import BillehColumn, SparseLayer
 from classification_tools import create_model
 import pandas as pd
 
@@ -41,15 +41,36 @@ class SparseLayerWithExternalBkg(tf.keras.layers.Layer):
     - 分别处理lgn_input和bkg_input，然后合并
     """
     def __init__(self, lgn_indices, lgn_weights, lgn_dense_shape, 
-                 bkg_indices, bkg_weights, bkg_dense_shape, dtype=tf.float32, **kwargs):
+                 bkg_indices, bkg_weights, bkg_dense_shape, 
+                 cell=None, dtype=tf.float32, **kwargs):
         super().__init__(**kwargs)
         # LGN输入参数
         self._lgn_indices = lgn_indices
         self._lgn_weights = tf.cast(lgn_weights, dtype)
         self._lgn_dense_shape = lgn_dense_shape
         
-        # 背景输入参数 - 确保数据类型一致性
+        # 背景输入参数 - 应用与SparseLayer相同的缩放处理
         self._bkg_indices = bkg_indices
+        
+        # 如果提供了cell信息，进行与BillehColumn相同的电压缩放处理
+        if cell is not None:
+            voltage_scale = cell._params['V_th'] - cell._params['E_L']
+            node_type_ids = cell._node_type_ids
+            n_receptors = cell._params['tau_syn'].shape[1]
+            
+            # 创建与BillehColumn相同的bkg_weights数组
+            # 这里需要将稀疏的bkg权重转换为密集的形式
+            full_bkg_weights = np.zeros((cell._n_neurons * n_receptors,), np.float32)
+            full_bkg_weights[bkg_indices[:, 0]] = bkg_weights
+            
+            # 应用电压缩放 - 与BillehColumn中相同的处理
+            full_bkg_weights = full_bkg_weights / np.repeat(voltage_scale[node_type_ids], n_receptors)
+            # 应用10倍放大 - 与BillehColumn中相同的处理
+            full_bkg_weights = full_bkg_weights * 10.
+            
+            # 重新提取稀疏权重
+            bkg_weights = full_bkg_weights[bkg_indices[:, 0]]
+        
         self._bkg_weights = tf.cast(bkg_weights, dtype)
         self._bkg_dense_shape = bkg_dense_shape
         
@@ -246,15 +267,16 @@ class V1SimulationTester:
         
         return cell, lgn_input, bkg_input
     
-    def run_simulation(self, cell, lgn_input, bkg_input, batch_size=1):
+    def run_simulation(self, cell, lgn_input, bkg_input, batch_size=1, sparselayer_externalbkg=False, use_rnn_layer=False):
         """
         运行神经网络仿真
         
         参数：
         cell: BillehColumn神经元模型
         lgn_input: LGN输入数据
+        bkg_input: 背景输入数据
         batch_size: 批次大小
-        use_rnn_layer: 是否使用TensorFlow RNN层（True=原始方法，False=逐时间步方法）
+        use_rnn_layer: 是否使用TensorFlow RNN层（True=TensorFlow RNN层，False=逐时间步方法）
         
         返回：
         simulation_results: 包含脉冲、膜电位等的仿真结果字典
@@ -275,11 +297,15 @@ class V1SimulationTester:
         bkg_spikes = tf.expand_dims(bkg_spikes, 0)  # 添加批次维度
         bkg_spikes = tf.tile(bkg_spikes, [batch_size, 1, 1])
         
-        return self._run_manual_simulation(
-               cell, lgn_spikes, bkg_spikes, lgn_input, bkg_input, batch_size, n_timesteps)
+        if use_rnn_layer:
+            return self._run_rnn_simulation(
+                cell, lgn_spikes, bkg_spikes, lgn_input, bkg_input, batch_size, n_timesteps, sparselayer_externalbkg)
+        else:
+            return self._run_manual_simulation(
+                cell, lgn_spikes, bkg_spikes, lgn_input, bkg_input, batch_size, n_timesteps, sparselayer_externalbkg)
 
     def _run_manual_simulation(self, cell, lgn_spikes, bkg_spikes, 
-                               lgn_input, bkg_input, batch_size, n_timesteps):
+                               lgn_input, bkg_input, batch_size, n_timesteps, sparselayer_externalbkg):
         """
         逐时间步手动循环的仿真方法（测试工具包方法）
         """
@@ -291,18 +317,28 @@ class V1SimulationTester:
         initial_state = cell.zero_state(batch_size, dtype=tf.float32)
         
         # 创建支持外部背景输入的输入层
-        input_layer = SparseLayerWithExternalBkg(
-            lgn_indices=cell.input_indices,
-            lgn_weights=cell.input_weight_values,
-            lgn_dense_shape=cell.input_dense_shape,
-            bkg_indices=bkg_input['indices'],
-            bkg_weights=bkg_input['weights'],
-            bkg_dense_shape=(cell._n_receptors * cell._n_neurons, bkg_input['n_inputs']),
-            dtype=tf.float32
-        )
-        
-        # 计算输入电流
-        input_currents = input_layer([lgn_spikes, bkg_spikes])
+        if sparselayer_externalbkg==True:
+            input_layer = SparseLayerWithExternalBkg(
+                lgn_indices=cell.input_indices,
+                lgn_weights=cell.input_weight_values,
+                lgn_dense_shape=cell.input_dense_shape,
+                bkg_indices=bkg_input['indices'],
+                bkg_weights=bkg_input['weights'],
+                bkg_dense_shape=(cell._n_receptors * cell._n_neurons, bkg_input['n_inputs']),
+                cell=cell,
+                dtype=tf.float32
+            )
+            input_currents = input_layer([lgn_spikes, bkg_spikes])     # 计算输入电流
+        if sparselayer_externalbkg==False:
+            input_layer = SparseLayer(
+                indices=cell.input_indices,
+                weights=cell.input_weight_values,
+                dense_shape=cell.input_dense_shape,
+                bkg_weights=cell.bkg_weights,
+                use_decoded_noise=False,
+                dtype=tf.float32
+            )
+            input_currents = input_layer(lgn_spikes)     # 计算输入电流
         
         # 运行仿真
         print("运行神经动力学仿真...")
@@ -369,6 +405,189 @@ class V1SimulationTester:
             'computation_time': computation_time,
             'method': '外部背景输入'
         }
+        
+        return simulation_results
+    
+    def _run_rnn_simulation(self, cell, lgn_spikes, bkg_spikes, 
+                           lgn_input, bkg_input, batch_size, n_timesteps, sparselayer_externalbkg):
+        """
+        使用TensorFlow RNN层的仿真方法（参考classification_tools.py中的create_model函数）
+        """
+        import time
+        start_time = time.time()
+        
+        print("运行基于TensorFlow RNN层的神经动力学仿真...")
+        
+        # 创建支持外部背景输入的输入层
+        if sparselayer_externalbkg==True:
+            input_layer = SparseLayerWithExternalBkg(
+                lgn_indices=cell.input_indices,
+                lgn_weights=cell.input_weight_values,
+                lgn_dense_shape=cell.input_dense_shape,
+                bkg_indices=bkg_input['indices'],
+                bkg_weights=bkg_input['weights'],
+                bkg_dense_shape=(cell._n_receptors * cell._n_neurons, bkg_input['n_inputs']),
+                cell=cell,
+                dtype=tf.float32
+            )
+            input_currents = input_layer([lgn_spikes, bkg_spikes])     # 计算输入电流
+        if sparselayer_externalbkg==False:
+            input_layer = SparseLayer(
+                indices=cell.input_indices,
+                weights=cell.input_weight_values,
+                dense_shape=cell.input_dense_shape,
+                bkg_weights=cell.bkg_weights,
+                use_decoded_noise=False,
+                dtype=tf.float32
+            )
+            input_currents = input_layer(lgn_spikes)     # 计算输入电流
+        
+        # 计算输入电流
+        input_currents = input_layer([lgn_spikes, bkg_spikes])
+        
+        # 初始化神经元状态
+        initial_state = cell.zero_state(batch_size, dtype=tf.float32)
+        
+        # 验证状态形状是否匹配
+        expected_shapes = [(batch_size, size) for size in cell.state_size]
+        actual_shapes = [tuple(s.shape) for s in initial_state]
+        
+        if expected_shapes != actual_shapes:
+            print(f"  警告: 状态形状不匹配!")
+            print(f"    期望形状: {expected_shapes}")
+            print(f"    实际形状: {actual_shapes}")
+            
+            # 检查是否是n_receptors变量名问题导致的不匹配
+            # 在BillehColumn的state_size定义中，使用的是n_receptors而不是self._n_receptors
+            # 这可能导致NameError或者使用了错误的值
+            corrected_state_size = (
+                cell._n_neurons * cell.max_delay,  # z buffer
+                cell._n_neurons,                   # v
+                cell._n_neurons,                   # r
+                cell._n_neurons,                   # asc 1
+                cell._n_neurons,                   # asc 2
+                cell._n_receptors * cell._n_neurons,     # psc rise
+                cell._n_receptors * cell._n_neurons,     # psc
+            )
+            print(f"    修正后的state_size: {corrected_state_size}")
+            
+            # 使用修正后的state_size重新计算期望形状
+            corrected_expected_shapes = [(batch_size, size) for size in corrected_state_size]
+            print(f"    修正后期望形状: {corrected_expected_shapes}")
+            
+            # 如果修正后的形状与实际形状匹配，则使用实际状态
+            if corrected_expected_shapes == actual_shapes:
+                print(f"    状态形状修正成功，使用原始状态")
+            else:
+                # 如果仍然不匹配，尝试调整状态张量
+                print(f"    仍需调整状态张量形状")
+                corrected_state = []
+                for i, (expected_shape, actual_tensor) in enumerate(zip(corrected_expected_shapes, initial_state)):
+                    if tuple(actual_tensor.shape) != expected_shape:
+                        print(f"    修正状态 {i}: {actual_tensor.shape} -> {expected_shape}")
+                        if expected_shape[1] > actual_tensor.shape[1]:
+                            # 如果期望的维度更大，用零填充
+                            padding_size = expected_shape[1] - actual_tensor.shape[1]
+                            padding = tf.zeros((batch_size, padding_size), dtype=actual_tensor.dtype)
+                            corrected_tensor = tf.concat([actual_tensor, padding], axis=1)
+                        else:
+                            # 如果期望的维度更小，截断
+                            corrected_tensor = actual_tensor[:, :expected_shape[1]]
+                        corrected_state.append(corrected_tensor)
+                    else:
+                        corrected_state.append(actual_tensor)
+                initial_state = tuple(corrected_state)
+                print(f"    最终修正后状态形状: {[s.shape for s in initial_state]}")
+        
+        # 创建自定义RNN包装器来处理状态形状不匹配问题
+        class CompatibleRNNCell(tf.keras.layers.Layer):
+            def __init__(self, original_cell, **kwargs):
+                super().__init__(**kwargs)
+                self.original_cell = original_cell
+                # 使用修正后的state_size
+                self.state_size = (
+                    original_cell._n_neurons * original_cell.max_delay,
+                    original_cell._n_neurons,
+                    original_cell._n_neurons,
+                    original_cell._n_neurons,
+                    original_cell._n_neurons,
+                    original_cell._n_receptors * original_cell._n_neurons,
+                    original_cell._n_receptors * original_cell._n_neurons,
+                )
+                self.output_size = original_cell._n_neurons
+            
+            def zero_state(self, batch_size, dtype=tf.float32):
+                return self.original_cell.zero_state(batch_size, dtype)
+            
+            def call(self, inputs, states, **kwargs):
+                return self.original_cell.call(inputs, states, **kwargs)
+        
+        # 使用兼容的RNN cell
+        compatible_cell = CompatibleRNNCell(cell)
+        
+        # 创建TensorFlow RNN层
+        rnn = tf.keras.layers.RNN(
+            compatible_cell, 
+            return_sequences=True, 
+            return_state=False, 
+            name='rsnn'
+        )
+        
+        # 运行RNN仿真
+        print("  使用TensorFlow RNN层执行仿真...")
+        try:
+            outputs = rnn(
+                input_currents, 
+                initial_state=initial_state
+            )
+        except Exception as e:
+            print(f"  RNN仿真失败: {e}")
+            print("  回退到逐时间步仿真方法...")
+            return self._run_manual_simulation(
+                cell, lgn_spikes, bkg_spikes, lgn_input, bkg_input, batch_size, n_timesteps)
+        
+        # 提取输出
+        if compatible_cell.original_cell._return_interal_variables:
+            # 当返回内部变量时，outputs是一个包含多个张量的tuple
+            spikes = outputs[0]
+            voltages = outputs[1]
+            ascs = outputs[2]
+            psc_rise = outputs[3]
+            psc = outputs[4]
+        else:
+            # 当不返回内部变量时，outputs是一个包含spikes和voltages的tuple
+            spikes = outputs[0]
+            voltages = outputs[1]
+            ascs = None
+            psc_rise = None
+            psc = None
+        
+        computation_time = time.time() - start_time
+        print(f"TensorFlow RNN仿真完成！耗时: {computation_time:.3f} 秒")
+        
+        # 计算统计信息
+        spike_rates = tf.reduce_mean(spikes, axis=(0, 1)).numpy()
+        mean_rate = np.mean(spike_rates)
+        
+        print(f"\n仿真统计：")
+        print(f"  平均发放率: {mean_rate:.2f} Hz")
+        print(f"  活跃神经元比例: {np.mean(spike_rates > 0.1):.2%}")
+        
+        # 构建仿真结果字典
+        simulation_results = {
+            'spikes': spikes.numpy(),
+            'voltages': voltages.numpy(),
+            'spike_rates': spike_rates,
+            'time_axis': np.arange(n_timesteps) * self.dt,
+            'computation_time': computation_time,
+            'method': 'TensorFlow RNN层'
+        }
+        
+        # 如果有内部变量，添加到结果中
+        if compatible_cell.original_cell._return_interal_variables:
+            simulation_results['adaptive_currents'] = ascs.numpy()
+            simulation_results['psc_rise'] = psc_rise.numpy()
+            simulation_results['psc'] = psc.numpy()
         
         return simulation_results
     
