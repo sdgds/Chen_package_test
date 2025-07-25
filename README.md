@@ -30,7 +30,7 @@ graph TD
     %% 单神经元分析工具
     subgraph SingleNeuron ["2️⃣3️⃣ 单神经元分析工具"]
         ChenSim["neuron_response_analysis.py<br/>Chen神经元仿真 (TensorFlow)<br/>• SingleNeuronModel类<br/>• 平台电流刺激<br/>• I-F曲线分析<br/>• 111种神经元类型"]
-        NESTSim["test_NEST_neuron.ipynb<br/>NEST神经元仿真<br/>• 高精度仿真 (0.1ms)<br/>• Chen-BMTK映射<br/>• 111种神经元类型"]
+        NESTSim["test_single_neuron.ipynb<br/>NEST神经元仿真<br/>• 高精度仿真 (0.1ms)<br/>• Chen-BMTK映射<br/>• 111种神经元类型"]
     end
     
     %% 网络仿真工具
@@ -41,7 +41,7 @@ graph TD
     
     %% 可视化工具
     subgraph Visualization ["📊 可视化分析工具"]
-        VisNB["test_visualization.ipynb<br/>综合可视化分析<br/>• 网络仿真结果展示<br/>• 参数对比分析<br/>• 交互式探索"]
+        VisNB["test_network.ipynb<br/>综合可视化分析<br/>• 网络仿真结果展示<br/>• 参数对比分析<br/>• 交互式探索"]
     end
     
     %% 数据流和调用关系
@@ -105,10 +105,10 @@ Training-data-driven-V1-model-test
         └── inputs/                      # 输入数据文件
     ├── bmtk_to_pkl_converter.py     # 数据转换模块
     ├── neuron_response_analysis.py  # Chen神经元响应分析模块
-    ├── test_NEST_neuron.ipynb       # NEST神经元仿真测试notebook
+    ├── test_single_neuron.ipynb       # NEST神经元仿真测试notebook
     ├── test_simulation.py           # 网络仿真测试脚本
     ├── interactive_test.py          # 交互式网络测试工具
-    ├── test_visualization.ipynb     # Jupyter可视化notebook
+    ├── test_network.ipynb     # Jupyter网络测试
     └── README.md              
 ```
 
@@ -228,7 +228,7 @@ Training-data-driven-V1-model-test
     - **电流控制**: 精确控制平台电流的起止时间和幅度
     - **状态管理**: 正确初始化和维护神经元的所有动力学状态
 
-### 3️⃣ test_NEST_neuron.ipynb - NEST神经元仿真测试
+### 3️⃣ test_single_neuron.ipynb - 单神经元仿真测试
 
 #### 功能概述
 
@@ -308,7 +308,7 @@ Training-data-driven-V1-model-test
     pip install nest-simulator
     
     # 启动Jupyter notebook
-    jupyter notebook test_NEST_neuron.ipynb
+    jupyter notebook test_single_neuron.ipynb
     ```
 
   ##### 基本使用流程
@@ -647,7 +647,7 @@ Training-data-driven-V1-model-test
 
   #### NEST神经元仿真（用于精确分析）
   ```python
-  # 在test_NEST_neuron.ipynb中运行
+  # 在test_single_neuron.ipynb中运行
   
   # 建立Chen到BMTK映射
   chen_to_bmtk_mapping = chen_to_bmtk_mapping_dict()
